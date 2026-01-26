@@ -185,3 +185,38 @@ body {
 .sighing {
     animation: sigh 2s ease-in-out !important;
 }
+
+/* Wobble animation for Egg Click */
+.wobble {
+    animation: wobble 0.5s ease-in-out;
+}
+
+@keyframes wobble {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    15% {
+        transform: rotate(-10deg);
+    }
+
+    30% {
+        transform: rotate(8deg);
+    }
+
+    45% {
+        transform: rotate(-6deg);
+    }
+
+    60% {
+        transform: rotate(4deg);
+    }
+
+    75% {
+        transform: rotate(-2deg);
+    }
+
+    100% {
+        transform: rotate(0deg);
+    }
+}

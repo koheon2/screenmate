@@ -324,10 +324,11 @@ function checkFoodGiven() {
 
     if (dist < 100) {
         isDragging = false;
-        currentMode = null; // Stop updating food
+        // currentMode = null; // Don't clear this, needed for endGame score calculation
         food.style.display = 'none';
         ipcRenderer.send('food-eaten');
 
+        // Show text locally too (or just allow main window to handle speech)
         const txt = document.createElement('div');
         txt.textContent = "존맛탱!! 🍖";
         txt.style.position = 'absolute';
@@ -339,7 +340,8 @@ function checkFoodGiven() {
         txt.style.borderRadius = '12px';
         document.body.appendChild(txt);
 
-        setTimeout(() => endGame(), 2000);
+        // Close faster (0.5s) to reduce latency feel
+        setTimeout(() => endGame(), 500);
     }
 }
 

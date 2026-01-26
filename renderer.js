@@ -143,9 +143,9 @@ character.addEventListener('mouseleave', () => {
 character.addEventListener('click', () => {
     ipcRenderer.send('egg-clicked');
 
-    // Shake effect on click
-    animationWrapper.classList.add('shake');
-    setTimeout(() => animationWrapper.classList.remove('shake'), 500);
+    // Wobble effect on click
+    animationWrapper.classList.add('wobble');
+    setTimeout(() => animationWrapper.classList.remove('wobble'), 500);
 });
 
 // Initial speech

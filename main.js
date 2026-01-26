@@ -20,7 +20,8 @@ let playerStats = {
     lastPlayTime: 0, // Timestamp
 
 };
-const PLAY_COOLDOWN = 5 * 60 * 1000; // 5 minutes
+// 5 minutes cooldown (Disabled for testing)
+const PLAY_COOLDOWN = 0;
 const userDataPath = path.join(app.getPath('userData'), 'user-data.json');
 
 function loadUserData() {
@@ -180,12 +181,12 @@ function createCharacterWindow() {
         if (!characterState.isReturningHome && !characterState.isFocusMode) {
             if (Math.random() > 0.7) {
                 isMoving = false;
-                console.log('Character is resting...');
+                // console.log('Character is resting...');
             } else {
                 isMoving = true;
                 vx = (Math.random() - 0.5) * 1.5;
                 vy = (Math.random() - 0.5) * 1.5;
-                console.log('Character is moving...');
+                // console.log('Character is moving...');
             }
         }
     }, 5000);
