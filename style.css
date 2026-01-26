@@ -34,8 +34,37 @@ body {
     object-fit: contain;
     /* Apply SVG filter to remove white background */
     filter: url(#remove-white) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.1));
-    /* Initial float animation */
-    animation: float 4s ease-in-out infinite;
+    /* Popup then float animation */
+    /* Popup then float animation */
+    animation: popup 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards, float 4s ease-in-out infinite 0.4s;
+}
+
+@keyframes popup {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.popdown {
+    animation: popdown 0.4s ease-in forwards !important;
+}
+
+@keyframes popdown {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(0);
+        opacity: 0;
+    }
 }
 
 @keyframes float {

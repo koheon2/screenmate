@@ -7,7 +7,7 @@ let loginWindow = null;
 let mainWindow = null;
 let homeWindow = null;
 let characterWindow = null;
-let characterState = { isReturningHome: false };
+let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false };
 let tray = null;
 
 // User state (in production, this would come from a backend)
@@ -119,6 +119,7 @@ function createCharacterWindow(startX, startY) {
     let vy = (Math.random() - 0.5) * 1.5;
     let isMoving = true;
     characterState.isReturningHome = false;
+    characterState.isExiting = false;
 
     // Toggle movement state every 5 seconds
     const movementToggle = setInterval(() => {
@@ -163,7 +164,7 @@ function createCharacterWindow(startX, startY) {
 
             // Character center offset is 125, 125
             const targetX = homeCX - 125;
-            const targetY = homeCY - 125;
+            const targetY = homeCY - 180; // Adjusted to be higher (was 125)
 
             // Move fast towards target
             const dx = targetX - x;
@@ -172,7 +173,22 @@ function createCharacterWindow(startX, startY) {
 
             if (dist < 10) {
                 // Arrived
-                characterWindow.close();
+                if (!characterState.isExiting) {
+                    characterState.isExiting = true;
+                    // Send signal to renderer to play popdown animation
+                    try {
+                        characterWindow.webContents.send('play-popdown');
+                    } catch (e) {
+                        characterWindow.close();
+                    }
+
+                    // Wait for animation (500ms) then close
+                    setTimeout(() => {
+                        try {
+                            if (characterWindow) characterWindow.close();
+                        } catch (e) { }
+                    }, 500);
+                }
                 return;
             }
 
@@ -189,23 +205,51 @@ function createCharacterWindow(startX, startY) {
         }
 
         if (isMoving) {
-            x += vx;
-            y += vy;
+            // FOCUS MODE: Hover above home
+            if (characterState.isFocusMode && homeWindow) {
+                try {
+                    const homeBounds = homeWindow.getBounds();
+                    const homeCX = homeBounds.x + homeBounds.width / 2;
+                    // Target: Above home
+                    const targetX = homeCX - 155; // Centered horizontally
+                    const targetY = homeBounds.y - 250; // Fixed height above home (increased from 180)
 
-            // Bounce off edges
-            if (x < 0 || x > width - 250) {
-                vx *= -1;
-                x = Math.max(0, Math.min(x, width - 250));
-            }
-            if (y < 0 || y > height - 250) {
-                vy *= -1;
-                y = Math.max(0, Math.min(y, height - 250));
-            }
+                    // Add slight hovering motion
+                    const hoverOffset = Math.sin(Date.now() / 800) * 15;
 
-            // Occasional change in direction (only if not returning home)
-            if (Math.random() < 0.01) {
-                vx = (Math.random() - 0.5) * 1.5;
-                vy = (Math.random() - 0.5) * 1.5;
+                    // Smooth lerp to target
+                    const dx = targetX - x;
+                    const dy = (targetY + hoverOffset) - y;
+
+                    x += dx * 0.05;
+                    y += dy * 0.05;
+
+                    // Update vx/vy for consistency
+                    vx = dx * 0.05;
+                    vy = dy * 0.05;
+                } catch (e) {
+                    // Fallback
+                }
+            } else {
+                // NORMAL MODE
+                x += vx;
+                y += vy;
+
+                // Bounce off edges
+                if (x < 0 || x > width - 250) {
+                    vx *= -1;
+                    x = Math.max(0, Math.min(x, width - 250));
+                }
+                if (y < 0 || y > height - 250) {
+                    vy *= -1;
+                    y = Math.max(0, Math.min(y, height - 250));
+                }
+
+                // Occasional change in direction
+                if (Math.random() < 0.01) {
+                    vx = (Math.random() - 0.5) * 1.5;
+                    vy = (Math.random() - 0.5) * 1.5;
+                }
             }
         }
 
@@ -236,7 +280,7 @@ function createCharacterWindow(startX, startY) {
 
 // ==================== TRAY ====================
 function createTray() {
-    const iconPath = path.join(__dirname, 'assets', 'EngPedgVoAA5xxF6.webp');
+    const iconPath = path.join(__dirname, 'assets', 'a.png');
     const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
     tray = new Tray(icon);
 
@@ -338,12 +382,30 @@ ipcMain.on('start-game', () => {
 ipcMain.on('show-main-window', () => {
     console.log('Show main window');
     if (currentUser) {
+        // Close character and home windows
+        if (characterWindow) {
+            try {
+                characterWindow.close();
+            } catch (e) { }
+        }
+        if (homeWindow) {
+            try {
+                homeWindow.close();
+            } catch (e) { }
+        }
+
         if (mainWindow) {
             mainWindow.show();
         } else {
             createMainWindow();
         }
     }
+});
+
+// Toggle Focus Mode
+ipcMain.on('toggle-focus-mode', (event, isFocusOn) => {
+    console.log('Focus Mode:', isFocusOn);
+    characterState.isFocusMode = isFocusOn;
 });
 
 // Toggle character visibility

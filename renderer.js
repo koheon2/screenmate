@@ -4,6 +4,10 @@ const speechBubble = document.getElementById('speech-bubble');
 const speechText = document.getElementById('speech-text');
 const character = document.getElementById('character');
 
+ipcRenderer.on('play-popdown', () => {
+    character.classList.add('popdown');
+});
+
 const NEGATIVE_PHRASES = [
     "하기 싫다...",
     "쓸데없는 짓...",

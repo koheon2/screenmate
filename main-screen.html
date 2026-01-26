@@ -128,6 +128,71 @@
         .logout-btn:hover {
             color: #333;
         }
+
+        /* Focus Mode Toggle */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 25px;
+        }
+
+        .toggle-label {
+            font-size: 14px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .switch {
+            -webkit-app-region: no-drag;
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 22px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            -webkit-transition: .4s;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            -webkit-transition: .4s;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: #333;
+        }
+
+        input:checked+.slider:before {
+            -webkit-transform: translateX(18px);
+            -ms-transform: translateX(18px);
+            transform: translateX(18px);
+        }
     </style>
 </head>
 
@@ -139,13 +204,20 @@
         <p class="user-info" id="user-info">환영합니다!</p>
 
         <div class="character-preview">
-            <img src="assets/EngPedgVoAA5xxF6.webp" alt="Character" id="character-img">
+            <img src="assets/a.png" alt="Character" id="character-img">
         </div>
 
         <p class="character-name" id="character-name">쿠치파치</p>
-        <p class="character-status" id="character-status">기분: 평범함</p>
 
         <button class="start-btn" id="start-btn">Start</button>
+
+        <div class="toggle-container">
+            <span class="toggle-label">집중 모드</span>
+            <label class="switch">
+                <input type="checkbox" id="focus-mode-toggle">
+                <span class="slider"></span>
+            </label>
+        </div>
     </div>
 
     <script>
@@ -156,6 +228,14 @@
             if (user && user.nickname) {
                 document.getElementById('user-info').textContent = `${user.nickname}님, 환영합니다!`;
             }
+        });
+
+        // Check initial Focus Mode state if needed (can be added later)
+
+        // Focus Mode Toggle
+        const focusToggle = document.getElementById('focus-mode-toggle');
+        focusToggle.addEventListener('change', (e) => {
+            ipcRenderer.send('toggle-focus-mode', e.target.checked);
         });
 
         document.getElementById('start-btn').addEventListener('click', () => {
