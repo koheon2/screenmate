@@ -32,7 +32,8 @@ const INITIAL_STATS = {
     lastEvolutionTime: Date.now(),
     hp: 100,
     lastFedTime: Date.now(),
-    lastHungerDamageTime: Date.now()
+    lastHungerDamageTime: Date.now(),
+    birthday: Date.now()
 };
 
 function loadUserData() {
@@ -51,6 +52,12 @@ function loadUserData() {
                     // Old flat format (migration)
                     playerStats = { ...INITIAL_STATS, ...fileData };
                 }
+
+                // Ensure birthday exists for migration
+                if (!playerStats.birthday) {
+                    playerStats.birthday = playerStats.lastEvolutionTime || Date.now();
+                }
+
                 console.log('Loaded user data. Active Pet:', playerStats.characterName, 'History count:', petHistory.length);
             }
         }
@@ -113,6 +120,27 @@ function createMainWindow() {
 
     mainWindow.on('closed', () => mainWindow = null);
 }
+
+// ==================== NAVIGATION ====================
+ipcMain.on('open-memorial', () => {
+    if (mainWindow) {
+        mainWindow.loadFile('memorial.html');
+    }
+});
+
+ipcMain.on('go-to-main', () => {
+    if (mainWindow) {
+        mainWindow.loadFile('main-screen.html');
+    }
+});
+
+ipcMain.handle('get-ui-state', () => {
+    return { isGameRunning };
+});
+
+ipcMain.handle('get-pet-history', () => {
+    return petHistory;
+});
 
 ipcMain.handle('reset-game', () => {
     // 1. Archive current dead pet into history
@@ -664,6 +692,12 @@ function updateDynamicImage() {
 
 // Check evolution progress and decrease happiness periodically
 setInterval(() => {
+    // 0. Ensure Home Window always exists if game is running
+    if (isGameRunning && !homeWindow) {
+        console.log('[Watchdog] Home icon missing. Recreating...');
+        createHomeWindow();
+    }
+
     // 1. Decrease Happiness (Decay)
     if (playerStats.happiness > 0) {
         playerStats.happiness = Math.max(0, playerStats.happiness - 1);
@@ -773,6 +807,7 @@ ipcMain.handle('start-play-mode', (event, mode) => {
     }
 
     if (mainWindow) mainWindow.hide();
+    // homeWindow remains visible
     if (!characterWindow) createCharacterWindow();
 
     createPlayWindow(mode);

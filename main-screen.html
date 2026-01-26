@@ -150,7 +150,8 @@
             background: transparent;
             cursor: pointer;
             font-size: 12px;
-            color: #999;
+            color: #333;
+            font-weight: 600;
             transition: color 0.2s;
         }
 
@@ -349,6 +350,7 @@
 
 <body>
     <button class="logout-btn" id="logout-btn">로그아웃</button>
+    <button class="logout-btn" id="memorial-btn" style="left: 90px; background: transparent;">🪦 납골당</button>
     <button class="close-btn" id="close-btn">×</button>
 
     <div class="container">
@@ -519,6 +521,10 @@
             ipcRenderer.send('start-game');
         });
 
+        document.getElementById('memorial-btn').addEventListener('click', () => {
+            ipcRenderer.send('open-memorial');
+        });
+
         document.getElementById('reset-btn').addEventListener('click', () => {
             ipcRenderer.invoke('reset-game').then(() => {
                 updateStats();
@@ -547,9 +553,15 @@
             if (isGameRunning) {
                 startBtn.textContent = '돌아가기';
             } else {
-                startBtn.textContent = 'Start';
+                startBtn.textContent = '시작하기';
             }
             updateStats();
+        });
+
+        // Request initial state to ensure button text is correct
+        ipcRenderer.invoke('get-ui-state').then(({ isGameRunning }) => {
+            const startBtn = document.getElementById('start-btn');
+            startBtn.textContent = isGameRunning ? '돌아가기' : '시작하기';
         });
 
         // Initial Stats Load
