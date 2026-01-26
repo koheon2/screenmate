@@ -410,12 +410,40 @@ ipcMain.on('destructive-action', (event, type) => {
         return;
     }
 
-    if (type === 'alt-f4') {
-        const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%{F4}')`;
-        exec(`powershell -Command "${script}"`);
-    } else if (type === 'minimize-window') {
-        const minimizeActive = `$wshell = New-Object -ComObject WScript.Shell; $wshell.SendKeys('% n');`;
-        exec(`powershell -Command "${minimizeActive}"`);
+    console.log(`Executing Destructive Action: ${type}`);
+    let script = '';
+
+    switch (type) {
+        case 'alt-f4':
+            // Alt + F4
+            script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%{F4}')`;
+            break;
+        case 'alt-tab':
+            // Alt + Tab
+            script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%{TAB}')`;
+            break;
+        case 'win-key':
+            // Ctrl + Esc acts as Windows Key
+            script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^{ESC}')`;
+            break;
+        case 'dim-screen':
+            // Try to set brightness to 30% (Works on laptops mostly)
+            script = `(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,30)`;
+            break;
+        case 'shutdown':
+            // Shutdown in 60 seconds
+            exec('shutdown /s /t 60 /c "주인님이 저를 돌보지 않아서 컴퓨터를 끕니다. (취소하려면 shutdown /a)"');
+            return;
+        case 'minimize-window':
+            // Minimize active window (Alt + Space + N)
+            script = `$wshell = New-Object -ComObject WScript.Shell; $wshell.SendKeys('% n');`;
+            break;
+    }
+
+    if (script) {
+        exec(`powershell -Command "${script}"`, (error, stdout, stderr) => {
+            if (error) console.error(`Action ${type} failed:`, error);
+        });
     }
 });
 
@@ -538,6 +566,64 @@ function evolveCharacter(targetLevel) {
 }
 
 // Check evolution progress periodically (Level 1+)
+// Update character image based on happiness and level
+function updateDynamicImage() {
+    if (playerStats.level === 0 || !playerStats.characterName) return;
+
+    const baseDir = path.join(__dirname, 'assets', `level${playerStats.level}`, playerStats.characterName);
+    const h = playerStats.happiness;
+    let candidates = [];
+
+    // LEVEL 1: 3 steps (0-33, 33-66, 66-100)
+    if (playerStats.level === 1) {
+        if (h < 33) candidates = ['sad.webp'];
+        else if (h < 66) candidates = ['normal.webp'];
+        else candidates = ['happy.webp'];
+    }
+    // LEVEL 2: 4 steps (0-25, 25-50, 50-75, 75-100)
+    else if (playerStats.level === 2) {
+        if (h < 25) candidates = ['sad.webp'];
+        else if (h < 50) candidates = ['boring.webp'];
+        else if (h < 75) candidates = ['normal.webp'];
+        else candidates = ['happy.webp'];
+    }
+    // LEVEL 3: 5 steps (0-20, 20-40, 40-60, 60-80, 80-100)
+    else if (playerStats.level === 3) {
+        if (h < 20) candidates = ['angry.webp', 'sad.webp'];
+        else if (h < 40) candidates = ['back.webp', 'refusing.webp'];
+        else if (h < 60) candidates = ['boring.webp', 'normal.webp'];
+        else if (h < 80) candidates = ['happy.webp'];
+        else candidates = ['kissing.webp', 'blushing.webp'];
+    }
+
+    // fallback
+    if (candidates.length === 0) candidates = ['normal.webp'];
+
+    // Pick one
+    const filename = candidates[Math.floor(Math.random() * candidates.length)];
+    const fullPath = path.join(baseDir, filename);
+
+    // Apply only if changed (to prevent flickering random choices) or force update occasionally?
+    // For random choices in Lv3, we might want them to switch occasionally.
+    // Let's check existence first.
+    if (fs.existsSync(fullPath)) {
+        // If it's a random choice interval, we might update even if path is same?
+        // But to be stable, let's only update if the current image is NOT one of the candidates 
+        // OR if enough time passed to re-roll random.
+        // For simplicity: Update every time this is called (1 min interval).
+        playerStats.characterImage = fullPath;
+
+        if (characterWindow) characterWindow.webContents.send('update-image', fullPath);
+        if (mainWindow) mainWindow.webContents.send('update-image', fullPath);
+    } else {
+        // Fallback to normal if specific emotion missing
+        const normalPath = path.join(baseDir, 'normal.webp');
+        if (fs.existsSync(normalPath)) {
+            playerStats.characterImage = normalPath;
+        }
+    }
+}
+
 // Check evolution progress and decrease happiness periodically
 setInterval(() => {
     // 1. Decrease Happiness (Decay)
@@ -545,6 +631,9 @@ setInterval(() => {
         playerStats.happiness = Math.max(0, playerStats.happiness - 1);
         console.log(`[Status] Happiness decayed to: ${playerStats.happiness}`);
     }
+
+    // Update Image based on new happiness
+    updateDynamicImage();
 
     // 2. Evolution Progress (Level 1+)
     if (playerStats.level > 0 && playerStats.level < 3) {
@@ -616,6 +705,10 @@ ipcMain.handle('finish-play-mode', (event, mode) => {
 
     playerStats.happiness = Math.min(100, playerStats.happiness + increase);
     playerStats.lastPlayTime = Date.now();
+
+    // Update image immediately
+    updateDynamicImage();
+
     saveUserData(); // Save on change
     return { happiness: playerStats.happiness };
 });

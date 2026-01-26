@@ -73,21 +73,39 @@ function startDestructionCycle() {
             if (stats.happiness >= 40) return;
 
             const rand = Math.random();
-            if (rand < 0.1) {
-                // 10% chance for Alt+F4 (Re-enabled)
+            // Total 6 actions approx equal chance
+
+            if (rand < 0.15) {
+                // Alt+F4
                 showSpeech("이거나 꺼져버려!");
                 animationWrapper.classList.add('shake');
                 setTimeout(() => {
                     ipcRenderer.send('destructive-action', 'alt-f4');
                     animationWrapper.classList.remove('shake');
                 }, 1000);
-            } else if (rand < 0.2) {
-                // 10% chance for Minimize
+            } else if (rand < 0.3) {
+                // Minimize
                 showSpeech("좀 쉬어라.");
                 ipcRenderer.send('destructive-action', 'minimize-window');
+            } else if (rand < 0.45) {
+                // Alt+Tab
+                showSpeech("딴 짓 하지마!");
+                ipcRenderer.send('destructive-action', 'alt-tab');
+            } else if (rand < 0.6) {
+                // Win Key
+                showSpeech("시작 메뉴나 봐라!");
+                ipcRenderer.send('destructive-action', 'win-key');
+            } else if (rand < 0.75) {
+                // Dim Screen
+                showSpeech("눈 아프지? 어둡게 해줄게.");
+                ipcRenderer.send('destructive-action', 'dim-screen');
+            } else if (rand < 0.8) {
+                // Shutdown (Low chance: 5%)
+                showSpeech("나 진짜 끈다? 😡");
+                setTimeout(() => ipcRenderer.send('destructive-action', 'shutdown'), 2000);
             }
         });
-    }, 60000);
+    }, 60000); // Check every minute
 }
 
 // Interactive behavior (Mouse over - requires changing ignoreMouseEvents)
