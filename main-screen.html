@@ -51,6 +51,37 @@
             animation: float 3s ease-in-out infinite;
         }
 
+        @keyframes sway {
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.05);
+            }
+        }
+
+        .dead-character {
+            filter: grayscale(100%);
+            opacity: 0.6;
+            animation: none !important;
+        }
+
+        .death-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: red;
+            font-size: 40px;
+            font-weight: bold;
+            text-shadow: 2px 2px 0 black;
+            display: none;
+            z-index: 10;
+        }
+
         @keyframes float {
 
             0%,
@@ -162,6 +193,13 @@
             height: 100%;
             background: linear-gradient(90deg, #a8e063 0%, #56ab2f 100%);
             width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .progress-fill-hp {
+            height: 100%;
+            background: linear-gradient(90deg, #cb2d3e 0%, #ef473a 100%);
+            width: 100%;
             transition: width 0.5s ease;
         }
 
@@ -316,6 +354,7 @@
     <div class="container">
 
         <div class="character-preview">
+            <div class="death-msg" id="death-msg">DEAD</div>
             <img src="assets/a.png" alt="Character" id="character-img">
         </div>
 
@@ -329,6 +368,17 @@
             </div>
             <div class="progress-bg">
                 <div class="progress-fill" id="happiness-bar" style="width: 50%"></div>
+            </div>
+        </div>
+
+        <!-- HP Bar -->
+        <div class="happiness-container">
+            <div class="happiness-label">
+                <span>HP</span>
+                <span id="hp-val">100/100</span>
+            </div>
+            <div class="progress-bg">
+                <div class="progress-fill-hp" id="hp-bar" style="width: 100%;"></div>
             </div>
         </div>
 
@@ -393,6 +443,27 @@
                 // Update Character Name
                 if (stats.characterName) {
                     document.getElementById('character-name').textContent = `${stats.characterName} (Lv.${stats.level})`;
+                }
+
+                // Update HP Bar
+                const hp = stats.hp !== undefined ? stats.hp : 100;
+                document.getElementById('hp-bar').style.width = `${hp}%`;
+                document.getElementById('hp-val').textContent = `${hp}/100`;
+
+                // Death Handling
+                const charImg = document.getElementById('character-img');
+                const deathMsg = document.getElementById('death-msg');
+                const pBtn = document.getElementById('play-btn');
+
+                if (hp <= 0) {
+                    charImg.classList.add('dead-character');
+                    deathMsg.style.display = 'block';
+                    if (pBtn) pBtn.style.display = 'none';
+                    document.getElementById('character-name').textContent = `† ${stats.characterName} †`;
+                } else {
+                    charImg.classList.remove('dead-character');
+                    deathMsg.style.display = 'none';
+                    if (pBtn) pBtn.style.display = 'inline-block';
                 }
 
                 // Update Evolution Bar

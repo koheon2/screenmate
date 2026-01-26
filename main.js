@@ -34,7 +34,10 @@ function loadUserData() {
         evolutionProgress: 0,
         characterImage: path.join(__dirname, 'assets/level0/level0.png'),
         evolutionHistory: [],
-        lastEvolutionTime: Date.now()
+        lastEvolutionTime: Date.now(),
+        hp: 100,
+        lastFedTime: Date.now(),
+        lastHungerDamageTime: Date.now()
     };
 
     playerStats = defaults;
@@ -51,6 +54,10 @@ function loadUserData() {
     } catch (e) {
         console.error('Failed to load user data:', e);
     }
+
+    // FORCE HP TO 0 FOR TESTING DEATH LOGIC
+    playerStats.hp = 0;
+    saveUserData();
 }
 
 function saveUserData() {
@@ -83,11 +90,11 @@ function createLoginWindow() {
 // ==================== MAIN SCREEN WINDOW ====================
 function createMainWindow() {
     mainWindow = new BrowserWindow({
-        width: 320,
-        height: 500,
+        width: 350,
+        height: 550,
         resizable: false,
         frame: false,
-        transparent: false,
+        fullscreenable: false, // Prevent Mac fullscreen
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
@@ -102,6 +109,14 @@ function createMainWindow() {
     });
 
     mainWindow.on('closed', () => mainWindow = null);
+}
+
+function handleDeath() {
+    if (characterWindow) {
+        characterWindow.close();
+        characterWindow = null;
+    }
+    console.log('--- CHARACTER HAS DIED ---');
 }
 
 // ==================== HOME ICON WINDOW ====================
@@ -632,11 +647,52 @@ setInterval(() => {
         console.log(`[Status] Happiness decayed to: ${playerStats.happiness}`);
     }
 
+    // Hunger Check (Recursive every 8 hours)
+    // 8 hours = 28800000 ms
+    const EIGHT_HOURS = 8 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    // Check if we need to apply damage (based on last damage time)
+    // Initialize lastHungerDamageTime if missing using lastFedTime
+    if (!playerStats.lastHungerDamageTime) playerStats.lastHungerDamageTime = playerStats.lastFedTime || now;
+
+    if (now - playerStats.lastHungerDamageTime >= EIGHT_HOURS) {
+        playerStats.hp = Math.max(0, playerStats.hp - 30);
+        playerStats.lastHungerDamageTime = now; // Reset damage timer
+        console.log(`[Status] HP penalty (-30) due to hunger!`);
+    }
+
+    // For recovery, we check actual last Fed Time
+    const timeSinceFed = now - (playerStats.lastFedTime || now);
+    const isStarving = timeSinceFed >= EIGHT_HOURS;
+
+    // HP Logic (Decay or Recover)
+    if (playerStats.hp === undefined) playerStats.hp = 100;
+
+    if (playerStats.happiness < 50) {
+        // Decay due to sadness (approx 10 per hour => 10/60 chance per minute)
+        if (playerStats.hp > 0 && Math.random() < 0.17) {
+            playerStats.hp = Math.max(0, playerStats.hp - 1);
+            console.log(`[Status] HP decayed due to sadness: ${playerStats.hp}`);
+        }
+    } else if (!isStarving) {
+        // Recover if Happy (>=50) and Not Starving
+        if (playerStats.hp < 100) {
+            playerStats.hp = Math.min(100, playerStats.hp + 1);
+            // console.log(`[Status] HP recovered: ${playerStats.hp}`);
+        }
+    }
+
     // Update Image based on new happiness
     updateDynamicImage();
 
+    // 3. Death Check
+    if (playerStats.hp <= 0) {
+        handleDeath();
+    }
+
     // 2. Evolution Progress (Level 1+)
-    if (playerStats.level > 0 && playerStats.level < 3) {
+    if (playerStats.level > 0 && playerStats.level < 3 && playerStats.hp > 0) {
         // Normal speed: 1% per minute
         // Bonus: If happy (> 60), grow faster (+2%)
         const growthRate = (playerStats.happiness > 60) ? 2 : 1;
@@ -682,7 +738,8 @@ ipcMain.handle('get-player-status', () => {
         characterImage: playerStats.characterImage,
         level: playerStats.level,
         characterName: displayName,
-        evolutionProgress: playerStats.evolutionProgress || 0
+        evolutionProgress: playerStats.evolutionProgress || 0,
+        hp: (playerStats.hp !== undefined) ? playerStats.hp : 100
     };
 });
 
@@ -705,6 +762,14 @@ ipcMain.handle('finish-play-mode', (event, mode) => {
 
     playerStats.happiness = Math.min(100, playerStats.happiness + increase);
     playerStats.lastPlayTime = Date.now();
+
+    if (mode === 'food') {
+        playerStats.lastFedTime = Date.now();
+        playerStats.lastHungerDamageTime = Date.now();
+        // Optional: Recover some HP when fed?
+        // playerStats.hp = Math.min(100, (playerStats.hp || 0) + 5);
+        console.log('[Status] Fed characters. Hunger timer reset.');
+    }
 
     // Update image immediately
     updateDynamicImage();
