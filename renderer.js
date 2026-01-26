@@ -64,23 +64,29 @@ function startSpeechCycle() {
 }
 
 // Destructive behavior cycle
+// Destructive behavior cycle
 function startDestructionCycle() {
     // Check every minute
     setInterval(() => {
-        const rand = Math.random();
-        if (false && rand < 0.1) {
-            // 10% chance for Alt+F4 (Disabled while working)
-            showSpeech("이거나 꺼져버려!");
-            animationWrapper.classList.add('shake');
-            setTimeout(() => {
-                ipcRenderer.send('destructive-action', 'alt-f4');
-                animationWrapper.classList.remove('shake');
-            }, 1000);
-        } else if (rand < 0.2) {
-            // 10% chance for Minimize
-            showSpeech("좀 쉬어라.");
-            ipcRenderer.send('destructive-action', 'minimize-window');
-        }
+        ipcRenderer.invoke('get-player-status').then(stats => {
+            // Only trigger if happiness is low (< 40)
+            if (stats.happiness >= 40) return;
+
+            const rand = Math.random();
+            if (rand < 0.1) {
+                // 10% chance for Alt+F4 (Re-enabled)
+                showSpeech("이거나 꺼져버려!");
+                animationWrapper.classList.add('shake');
+                setTimeout(() => {
+                    ipcRenderer.send('destructive-action', 'alt-f4');
+                    animationWrapper.classList.remove('shake');
+                }, 1000);
+            } else if (rand < 0.2) {
+                // 10% chance for Minimize
+                showSpeech("좀 쉬어라.");
+                ipcRenderer.send('destructive-action', 'minimize-window');
+            }
+        });
     }, 60000);
 }
 

@@ -403,6 +403,12 @@ ipcMain.on('set-ignore-mouse', (event, ignore) => {
 });
 
 ipcMain.on('destructive-action', (event, type) => {
+    // Safety guard: Only allow if happiness is low (< 40)
+    if (playerStats.happiness >= 40) {
+        console.log(`Destructive action '${type}' blocked (Happiness: ${playerStats.happiness})`);
+        return;
+    }
+
     if (type === 'alt-f4') {
         const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%{F4}')`;
         exec(`powershell -Command "${script}"`);
@@ -531,19 +537,31 @@ function evolveCharacter(targetLevel) {
 }
 
 // Check evolution progress periodically (Level 1+)
+// Check evolution progress and decrease happiness periodically
 setInterval(() => {
-    if (playerStats.level > 0 && playerStats.level < 3) {
-        // FAST TESTING: 20% every 2 seconds (Evolves in ~10 seconds)
-        playerStats.evolutionProgress = Math.min(100, (playerStats.evolutionProgress || 0) + 20);
+    // 1. Decrease Happiness (Decay)
+    if (playerStats.happiness > 0) {
+        playerStats.happiness = Math.max(0, playerStats.happiness - 1);
+        console.log(`[Status] Happiness decayed to: ${playerStats.happiness}`);
+    }
 
-        console.log(`[Evolution] Level ${playerStats.level} Progress: ${playerStats.evolutionProgress}%`);
+    // 2. Evolution Progress (Level 1+)
+    if (playerStats.level > 0 && playerStats.level < 3) {
+        // Normal speed: 1% per minute
+        // Bonus: If happy (> 60), grow faster (+2%)
+        const growthRate = (playerStats.happiness > 60) ? 2 : 1;
+
+        playerStats.evolutionProgress = Math.min(100, (playerStats.evolutionProgress || 0) + growthRate);
+
+        console.log(`[Evolution] Level ${playerStats.level} Progress: ${playerStats.evolutionProgress}% (+${growthRate})`);
 
         if (playerStats.evolutionProgress >= 100) {
             evolveCharacter(playerStats.level + 1);
         }
-        // Save occasionally? Maybe not every tick to save IO.
     }
-}, 2000); // Check every 2s
+
+    saveUserData();
+}, 60000); // Check every 1 minute
 
 // ==================== PLAY MODE & MINIGAMES ====================
 
@@ -573,7 +591,8 @@ ipcMain.handle('get-player-status', () => {
         remainingCooldown,
         characterImage: playerStats.characterImage,
         level: playerStats.level,
-        characterName: displayName
+        characterName: displayName,
+        evolutionProgress: playerStats.evolutionProgress || 0
     };
 });
 
@@ -590,8 +609,11 @@ ipcMain.handle('start-play-mode', (event, mode) => {
     return { success: true };
 });
 
-ipcMain.handle('finish-play-mode', () => {
-    playerStats.happiness = Math.min(100, playerStats.happiness + 10);
+ipcMain.handle('finish-play-mode', (event, mode) => {
+    // Determine stats increase based on mode
+    const increase = (mode === 'food') ? 3 : 10;
+
+    playerStats.happiness = Math.min(100, playerStats.happiness + increase);
     playerStats.lastPlayTime = Date.now();
     saveUserData(); // Save on change
     return { happiness: playerStats.happiness };

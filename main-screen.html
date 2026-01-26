@@ -26,6 +26,7 @@
         .container {
             text-align: center;
             padding: 20px;
+            padding-top: 50px;
         }
 
         .user-info {
@@ -130,7 +131,7 @@
         .happiness-container {
             width: 100%;
             max-width: 200px;
-            margin: 0 auto 25px;
+            margin: 0 auto 10px;
             text-align: left;
         }
 
@@ -154,6 +155,13 @@
             height: 100%;
             background: linear-gradient(90deg, #66b3ff 0%, #007bff 100%);
             width: 50%;
+            transition: width 0.5s ease;
+        }
+
+        .progress-fill-evo {
+            height: 100%;
+            background: linear-gradient(90deg, #a8e063 0%, #56ab2f 100%);
+            width: 0%;
             transition: width 0.5s ease;
         }
 
@@ -306,7 +314,6 @@
     <button class="close-btn" id="close-btn">×</button>
 
     <div class="container">
-        <p class="user-info" id="user-info">환영합니다!</p>
 
         <div class="character-preview">
             <img src="assets/a.png" alt="Character" id="character-img">
@@ -322,6 +329,17 @@
             </div>
             <div class="progress-bg">
                 <div class="progress-fill" id="happiness-bar" style="width: 50%"></div>
+            </div>
+        </div>
+
+        <!-- Evolution Bar -->
+        <div class="happiness-container" id="evo-container" style="display: none; margin-bottom: 25px;">
+            <div class="happiness-label">
+                <span>진화</span>
+                <span id="evo-val">0%</span>
+            </div>
+            <div class="progress-bg">
+                <div class="progress-fill-evo" id="evo-bar" style="width: 0%;"></div>
             </div>
         </div>
 
@@ -374,7 +392,22 @@
 
                 // Update Character Name
                 if (stats.characterName) {
-                    document.getElementById('character-name').textContent = stats.characterName;
+                    document.getElementById('character-name').textContent = `${stats.characterName} (Lv.${stats.level})`;
+                }
+
+                // Update Evolution Bar
+                const evoContainer = document.getElementById('evo-container');
+                if (stats.level > 0) {
+                    evoContainer.style.display = 'block';
+                    if (stats.level >= 3) {
+                        document.getElementById('evo-bar').style.width = '100%';
+                        document.getElementById('evo-val').textContent = '100%';
+                    } else {
+                        document.getElementById('evo-bar').style.width = `${stats.evolutionProgress}%`;
+                        document.getElementById('evo-val').textContent = `${stats.evolutionProgress}%`;
+                    }
+                } else {
+                    evoContainer.style.display = 'none';
                 }
 
                 // Update Play Button (Cooldown)
@@ -396,12 +429,6 @@
         });
 
         // --- Event Listeners ---
-
-        ipcRenderer.invoke('get-user-info').then(user => {
-            if (user && user.nickname) {
-                document.getElementById('user-info').textContent = `${user.nickname}님, 환영합니다!`;
-            }
-        });
 
         const focusToggle = document.getElementById('focus-mode-toggle');
         focusToggle.addEventListener('change', (e) => {
