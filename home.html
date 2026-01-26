@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: transparent;
+            overflow: hidden;
+        }
+
+        .home-icon {
+            width: 120px;
+            height: 120px;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+        }
+
+        .home-icon:hover {
+            transform: scale(1.1);
+        }
+
+        .home-icon:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+
+<body>
+    <img src="assets/others/home_transparent.png" class="home-icon" id="home-icon" alt="Home">
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        let clickTimeout = null;
+
+        const homeIcon = document.getElementById('home-icon');
+
+        homeIcon.addEventListener('click', () => {
+            if (clickTimeout) {
+                clearTimeout(clickTimeout);
+                clickTimeout = null;
+                // Double click behavior is handled by dblclick event, 
+                // but we need to clear logic here if we wanted to prevent single click action on double click.
+                // However, dblclick fires after two clicks.
+                // To separate cleanly:
+            } else {
+                clickTimeout = setTimeout(() => {
+                    ipcRenderer.send('toggle-character');
+                    clickTimeout = null;
+                }, 250); // 250ms wait to check for double click
+            }
+        });
+
+        homeIcon.addEventListener('dblclick', () => {
+            if (clickTimeout) {
+                clearTimeout(clickTimeout);
+                clickTimeout = null;
+            }
+            ipcRenderer.send('show-main-window');
+        });
+    </script>
+</body>
+
+</html>

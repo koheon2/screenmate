@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CynicalFloater - 메인</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #ffffff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            -webkit-app-region: drag;
+        }
+
+        .container {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .user-info {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .character-preview {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .character-preview img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-8px);
+            }
+        }
+
+        .character-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .character-status {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 30px;
+        }
+
+        .start-btn {
+            -webkit-app-region: no-drag;
+            padding: 12px 40px;
+            background: #333;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .start-btn:hover {
+            background: #555;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .close-btn {
+            -webkit-app-region: no-drag;
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 24px;
+            height: 24px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 18px;
+            color: #999;
+            transition: color 0.2s;
+        }
+
+        .close-btn:hover {
+            color: #333;
+        }
+
+        .logout-btn {
+            -webkit-app-region: no-drag;
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 12px;
+            color: #999;
+            transition: color 0.2s;
+        }
+
+        .logout-btn:hover {
+            color: #333;
+        }
+    </style>
+</head>
+
+<body>
+    <button class="logout-btn" id="logout-btn">로그아웃</button>
+    <button class="close-btn" id="close-btn">×</button>
+
+    <div class="container">
+        <p class="user-info" id="user-info">환영합니다!</p>
+
+        <div class="character-preview">
+            <img src="assets/EngPedgVoAA5xxF6.webp" alt="Character" id="character-img">
+        </div>
+
+        <p class="character-name" id="character-name">쿠치파치</p>
+        <p class="character-status" id="character-status">기분: 평범함</p>
+
+        <button class="start-btn" id="start-btn">Start</button>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        // Get user info when page loads
+        ipcRenderer.invoke('get-user-info').then(user => {
+            if (user && user.nickname) {
+                document.getElementById('user-info').textContent = `${user.nickname}님, 환영합니다!`;
+            }
+        });
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            ipcRenderer.send('start-game');
+        });
+
+        document.getElementById('close-btn').addEventListener('click', () => {
+            ipcRenderer.send('close-app');
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', () => {
+            ipcRenderer.send('logout');
+        });
+    </script>
+</body>
+
+</html>
