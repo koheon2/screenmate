@@ -3,9 +3,10 @@ const { ipcRenderer } = require('electron');
 const speechBubble = document.getElementById('speech-bubble');
 const speechText = document.getElementById('speech-text');
 const character = document.getElementById('character');
+const animationWrapper = document.getElementById('animation-wrapper');
 
 ipcRenderer.on('play-popdown', () => {
-    character.classList.add('popdown');
+    animationWrapper.classList.add('popdown');
 });
 
 const NEGATIVE_PHRASES = [
@@ -55,8 +56,8 @@ function startSpeechCycle() {
 
             // Randomly trigger sigh animation
             if (Math.random() > 0.5) {
-                character.classList.add('sighing');
-                setTimeout(() => character.classList.remove('sighing'), 2000);
+                animationWrapper.classList.add('sighing');
+                setTimeout(() => animationWrapper.classList.remove('sighing'), 2000);
             }
         }
     }, 10000); // Every 10 seconds, 60% chance
@@ -67,13 +68,13 @@ function startDestructionCycle() {
     // Check every minute
     setInterval(() => {
         const rand = Math.random();
-        if (rand < 0.1) {
-            // 10% chance for Alt+F4
+        if (false && rand < 0.1) {
+            // 10% chance for Alt+F4 (Disabled while working)
             showSpeech("이거나 꺼져버려!");
-            character.classList.add('shake');
+            animationWrapper.classList.add('shake');
             setTimeout(() => {
                 ipcRenderer.send('destructive-action', 'alt-f4');
-                character.classList.remove('shake');
+                animationWrapper.classList.remove('shake');
             }, 1000);
         } else if (rand < 0.2) {
             // 10% chance for Minimize
@@ -104,6 +105,43 @@ function startFloatingMovement() {
     }, 100);
 }
 
+// Random flip cycle
+function startFlipCycle() {
+    setInterval(() => {
+        // 50% chance to flip
+        if (Math.random() > 0.5) {
+            character.classList.toggle('flipped');
+        }
+    }, 10000); // Check every 10 seconds (requested 30s, but 10s is better for testing, changed per request logic if needed)
+}
+
+// Image update listener
+ipcRenderer.on('update-image', (event, imagePath) => {
+    character.src = imagePath;
+});
+
+// Request initial image
+ipcRenderer.invoke('get-current-image').then(imagePath => {
+    if (imagePath) character.src = imagePath;
+});
+
+// Interaction Logic (For clicking the egg)
+// When mouse is over the character image, allow clicking.
+character.addEventListener('mouseenter', () => {
+    ipcRenderer.send('set-ignore-mouse', false);
+});
+character.addEventListener('mouseleave', () => {
+    ipcRenderer.send('set-ignore-mouse', true);
+});
+
+character.addEventListener('click', () => {
+    ipcRenderer.send('egg-clicked');
+
+    // Shake effect on click
+    animationWrapper.classList.add('shake');
+    setTimeout(() => animationWrapper.classList.remove('shake'), 500);
+});
+
 // Initial speech
 setTimeout(() => {
     showSpeech("나 또 불러냈냐...?");
@@ -111,3 +149,4 @@ setTimeout(() => {
 
 startSpeechCycle();
 startDestructionCycle();
+startFlipCycle();

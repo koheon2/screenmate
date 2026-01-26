@@ -66,13 +66,7 @@
             font-size: 18px;
             font-weight: 600;
             color: #333;
-            margin-bottom: 8px;
-        }
-
-        .character-status {
-            font-size: 12px;
-            color: #888;
-            margin-bottom: 30px;
+            margin-bottom: 15px;
         }
 
         .start-btn {
@@ -85,6 +79,9 @@
             font-size: 14px;
             cursor: pointer;
             transition: all 0.2s ease;
+            width: 100%;
+            max-width: 200px;
+            margin-bottom: 15px;
         }
 
         .start-btn:hover {
@@ -129,6 +126,63 @@
             color: #333;
         }
 
+        /* Happiness Bar */
+        .happiness-container {
+            width: 100%;
+            max-width: 200px;
+            margin: 0 auto 25px;
+            text-align: left;
+        }
+
+        .happiness-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .progress-bg {
+            width: 100%;
+            height: 10px;
+            background: #eee;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #66b3ff 0%, #007bff 100%);
+            width: 50%;
+            transition: width 0.5s ease;
+        }
+
+        /* Play Button */
+        .play-btn {
+            -webkit-app-region: no-drag;
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            width: 100%;
+            max-width: 200px;
+            transition: all 0.2s;
+        }
+
+        .play-btn:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+        }
+
+        .play-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         /* Focus Mode Toggle */
         .toggle-container {
             display: flex;
@@ -166,7 +220,6 @@
             right: 0;
             bottom: 0;
             background-color: #ccc;
-            -webkit-transition: .4s;
             transition: .4s;
             border-radius: 34px;
         }
@@ -179,7 +232,6 @@
             left: 3px;
             bottom: 3px;
             background-color: white;
-            -webkit-transition: .4s;
             transition: .4s;
             border-radius: 50%;
         }
@@ -189,9 +241,62 @@
         }
 
         input:checked+.slider:before {
-            -webkit-transform: translateX(18px);
-            -ms-transform: translateX(18px);
             transform: translateX(18px);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            -webkit-app-region: no-drag;
+        }
+
+        .modal {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 250px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+            text-align: center;
+        }
+
+        .modal h3 {
+            margin-bottom: 15px;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .modal-btn {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .modal-btn:hover {
+            background: #f5f5f5;
+        }
+
+        .modal-close {
+            margin-top: 10px;
+            color: #888;
+            font-size: 12px;
+            cursor: pointer;
+            text-decoration: underline;
         }
     </style>
 </head>
@@ -209,7 +314,19 @@
 
         <p class="character-name" id="character-name">쿠치파치</p>
 
+        <!-- Happiness Bar -->
+        <div class="happiness-container">
+            <div class="happiness-label">
+                <span>행복도</span>
+                <span id="happiness-val">50/100</span>
+            </div>
+            <div class="progress-bg">
+                <div class="progress-fill" id="happiness-bar" style="width: 50%"></div>
+            </div>
+        </div>
+
         <button class="start-btn" id="start-btn">Start</button>
+        <button class="play-btn" id="play-btn">놀아주기 (준비중)</button>
 
         <div class="toggle-container">
             <span class="toggle-label">집중 모드</span>
@@ -220,19 +337,72 @@
         </div>
     </div>
 
+    <!-- Play Mode Modal -->
+    <div class="modal-overlay" id="play-modal">
+        <div class="modal">
+            <h3>놀아주기 선택</h3>
+            <button class="modal-btn" onclick="selectPlayMode('ball')">🏀 공놀이 (30초)</button>
+            <button class="modal-btn" onclick="selectPlayMode('food')">🍖 밥주기</button>
+            <div class="modal-close" id="close-modal">닫기</div>
+        </div>
+    </div>
+
     <script>
         const { ipcRenderer } = require('electron');
 
-        // Get user info when page loads
+        // Functions defined globally
+        window.selectPlayMode = function (mode) {
+            ipcRenderer.invoke('start-play-mode', mode).then(res => {
+                if (res.success) {
+                    document.getElementById('play-modal').style.display = 'none';
+                } else {
+                    alert(res.message);
+                }
+            });
+        };
+
+        function updateStats() {
+            ipcRenderer.invoke('get-player-status').then(stats => {
+                // Update Happiness
+                document.getElementById('happiness-val').textContent = `${stats.happiness}/100`;
+                document.getElementById('happiness-bar').style.width = `${stats.happiness}%`;
+
+                // Update Character Image
+                if (stats.characterImage) {
+                    document.getElementById('character-img').src = stats.characterImage;
+                }
+
+                // Update Character Name
+                if (stats.characterName) {
+                    document.getElementById('character-name').textContent = stats.characterName;
+                }
+
+                // Update Play Button (Cooldown)
+                const playBtn = document.getElementById('play-btn');
+                if (stats.remainingCooldown > 0) {
+                    playBtn.disabled = true;
+                    const min = Math.ceil(stats.remainingCooldown / 60000);
+                    playBtn.textContent = `놀아주기 (${min}분)`;
+                } else {
+                    playBtn.disabled = false;
+                    playBtn.textContent = '놀아주기 🎮';
+                }
+            });
+        }
+
+        // Listen for image updates directly
+        ipcRenderer.on('update-image', (event, path) => {
+            if (path) document.getElementById('character-img').src = path;
+        });
+
+        // --- Event Listeners ---
+
         ipcRenderer.invoke('get-user-info').then(user => {
             if (user && user.nickname) {
                 document.getElementById('user-info').textContent = `${user.nickname}님, 환영합니다!`;
             }
         });
 
-        // Check initial Focus Mode state if needed (can be added later)
-
-        // Focus Mode Toggle
         const focusToggle = document.getElementById('focus-mode-toggle');
         focusToggle.addEventListener('change', (e) => {
             ipcRenderer.send('toggle-focus-mode', e.target.checked);
@@ -249,6 +419,30 @@
         document.getElementById('logout-btn').addEventListener('click', () => {
             ipcRenderer.send('logout');
         });
+
+        document.getElementById('play-btn').addEventListener('click', () => {
+            document.getElementById('play-modal').style.display = 'flex';
+        });
+
+        document.getElementById('close-modal').addEventListener('click', () => {
+            document.getElementById('play-modal').style.display = 'none';
+        });
+
+        // Listen for UI state updates from main process
+        ipcRenderer.on('update-ui-state', (event, { isGameRunning }) => {
+            const startBtn = document.getElementById('start-btn');
+            if (isGameRunning) {
+                startBtn.textContent = '돌아가기';
+            } else {
+                startBtn.textContent = 'Start';
+            }
+            updateStats();
+        });
+
+        // Initial Stats Load
+        updateStats();
+        // Refresh stats periodically
+        setInterval(updateStats, 10000);
     </script>
 </body>
 

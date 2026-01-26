@@ -1,5 +1,6 @@
 const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { exec } = require('child_process');
 
 // Window references
@@ -7,54 +8,99 @@ let loginWindow = null;
 let mainWindow = null;
 let homeWindow = null;
 let characterWindow = null;
+let playWindow = null;
 let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false };
 let tray = null;
 
-// User state (in production, this would come from a backend)
+// User state
 let currentUser = null;
+let isGameRunning = false;
+let playerStats = {
+    happiness: 50,
+    lastPlayTime: 0, // Timestamp
+
+};
+const PLAY_COOLDOWN = 5 * 60 * 1000; // 5 minutes
+const userDataPath = path.join(app.getPath('userData'), 'user-data.json');
+
+function loadUserData() {
+    // Default initial stats
+    const defaults = {
+        happiness: 50,
+        lastPlayTime: 0,
+        level: 0,
+        clickCount: 0,
+        evolutionProgress: 0,
+        characterImage: path.join(__dirname, 'assets/level0/level0.png'),
+        evolutionHistory: [],
+        lastEvolutionTime: Date.now()
+    };
+
+    playerStats = defaults;
+
+    try {
+        if (fs.existsSync(userDataPath)) {
+            const data = JSON.parse(fs.readFileSync(userDataPath, 'utf8'));
+            if (data) {
+                // Merge loaded data with defaults to ensure new fields exist
+                playerStats = { ...defaults, ...data };
+                console.log('Loaded user data:', playerStats);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load user data:', e);
+    }
+}
+
+function saveUserData() {
+    try {
+        fs.writeFileSync(userDataPath, JSON.stringify(playerStats), 'utf8');
+        console.log('Saved user data');
+    } catch (e) {
+        console.error('Failed to save user data:', e);
+    }
+}
 
 // ==================== LOGIN WINDOW ====================
 function createLoginWindow() {
     loginWindow = new BrowserWindow({
-        width: 350,
-        height: 400,
+        width: 300,
+        height: 400, // Reverted to original size
         resizable: false,
         frame: false,
         transparent: false,
-        backgroundColor: '#ffffff',
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
-        },
+        }
     });
 
     loginWindow.loadFile('login.html');
-
-    loginWindow.on('closed', () => {
-        loginWindow = null;
-    });
+    loginWindow.on('closed', () => loginWindow = null);
 }
 
 // ==================== MAIN SCREEN WINDOW ====================
 function createMainWindow() {
     mainWindow = new BrowserWindow({
-        width: 300,
-        height: 400,
+        width: 320,
+        height: 500,
         resizable: false,
         frame: false,
         transparent: false,
-        backgroundColor: '#ffffff',
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
-        },
+        }
     });
 
     mainWindow.loadFile('main-screen.html');
 
-    mainWindow.on('closed', () => {
-        mainWindow = null;
+    // Send initial state when loaded
+    mainWindow.webContents.on('did-finish-load', () => {
+        mainWindow.webContents.send('update-ui-state', { isGameRunning });
     });
+
+    mainWindow.on('closed', () => mainWindow = null);
 }
 
 // ==================== HOME ICON WINDOW ====================
@@ -67,54 +113,62 @@ function createHomeWindow() {
         height: 140,
         x: 20,
         y: height - 160,
-        transparent: true,
         frame: false,
+        transparent: true,
         alwaysOnTop: true,
-        resizable: false,
         skipTaskbar: true,
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
-        },
+        }
     });
 
     homeWindow.loadFile('home.html');
-    homeWindow.setIgnoreMouseEvents(false);
-
-    homeWindow.on('closed', () => {
-        homeWindow = null;
-    });
+    homeWindow.on('closed', () => homeWindow = null);
 }
 
 // ==================== CHARACTER WINDOW ====================
-function createCharacterWindow(startX, startY) {
+function createCharacterWindow() {
+    // Determine spawn position
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
 
-    // Use provided position or random initial position
-    const x = startX !== undefined ? startX : Math.floor(Math.random() * (width - 200));
-    const y = startY !== undefined ? startY : Math.floor(Math.random() * (height - 200));
+    let startX = Math.round(width / 2 - 125);
+    let startY = Math.round(height / 2 - 125);
+
+    // If home exists, spawn there
+    if (homeWindow) {
+        try {
+            const homeBounds = homeWindow.getBounds();
+            startX = Math.round((homeBounds.x + homeBounds.width / 2) - 125);
+            startY = Math.round((homeBounds.y + homeBounds.height / 2) - 125); // Adjusted Y
+        } catch (e) { }
+    }
 
     characterWindow = new BrowserWindow({
         width: 250,
         height: 250,
-        x: x,
-        y: y,
-        transparent: true,
+        x: startX,
+        y: startY,
         frame: false,
+        transparent: true,
         alwaysOnTop: true,
-        resizable: false,
         skipTaskbar: true,
+        hasShadow: false,
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
-        },
+        }
     });
 
     characterWindow.loadFile('character.html');
+
+    // Make window click-through for transparent areas
     characterWindow.setIgnoreMouseEvents(true, { forward: true });
 
-    // Floating movement logic
+    // Movement Logic
+    let x = startX;
+    let y = startY;
     let vx = (Math.random() - 0.5) * 1.5;
     let vy = (Math.random() - 0.5) * 1.5;
     let isMoving = true;
@@ -123,21 +177,11 @@ function createCharacterWindow(startX, startY) {
 
     // Toggle movement state every 5 seconds
     const movementToggle = setInterval(() => {
-        if (!characterWindow) {
-            clearInterval(movementToggle);
-            return;
-        }
-
-        // Don't toggle movement if returning home
-        if (characterState.isReturningHome) return;
-
-        if (isMoving) {
-            if (Math.random() < 0.4) {
+        if (!characterState.isReturningHome && !characterState.isFocusMode) {
+            if (Math.random() > 0.7) {
                 isMoving = false;
                 console.log('Character is resting...');
-            }
-        } else {
-            if (Math.random() < 0.6) {
+            } else {
                 isMoving = true;
                 vx = (Math.random() - 0.5) * 1.5;
                 vy = (Math.random() - 0.5) * 1.5;
@@ -149,24 +193,25 @@ function createCharacterWindow(startX, startY) {
     const movementLoop = setInterval(() => {
         if (!characterWindow) {
             clearInterval(movementLoop);
+            clearInterval(movementToggle);
             return;
         }
 
-        let { x, y } = characterWindow.getBounds();
-        const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+        let currentBounds = characterWindow.getBounds();
+        // If user drags character, update internal x,y
+        // Note: Drag might fight with this loop if not handled carefully, 
+        // but since we update bounds every frame, it overrides drag unless paused.
+        // For now, let's trust internal vars x,y except when focus mode changes or spawn.
 
         // RETURN HOME LOGIC
         if (characterState.isReturningHome && homeWindow) {
             const homeBounds = homeWindow.getBounds();
-            // Target center: home center
             const homeCX = homeBounds.x + homeBounds.width / 2;
             const homeCY = homeBounds.y + homeBounds.height / 2;
 
-            // Character center offset is 125, 125
             const targetX = homeCX - 125;
-            const targetY = homeCY - 180; // Adjusted to be higher (was 125)
+            const targetY = homeCY - 180;
 
-            // Move fast towards target
             const dx = targetX - x;
             const dy = targetY - y;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -175,14 +220,11 @@ function createCharacterWindow(startX, startY) {
                 // Arrived
                 if (!characterState.isExiting) {
                     characterState.isExiting = true;
-                    // Send signal to renderer to play popdown animation
                     try {
                         characterWindow.webContents.send('play-popdown');
                     } catch (e) {
                         characterWindow.close();
                     }
-
-                    // Wait for animation (500ms) then close
                     setTimeout(() => {
                         try {
                             if (characterWindow) characterWindow.close();
@@ -192,7 +234,6 @@ function createCharacterWindow(startX, startY) {
                 return;
             }
 
-            // Move speed 
             const speed = Math.max(5, dist / 10);
             vx = (dx / dist) * speed;
             vy = (dy / dist) * speed;
@@ -201,80 +242,63 @@ function createCharacterWindow(startX, startY) {
             y += vy;
 
             characterWindow.setBounds({ x: Math.round(x), y: Math.round(y), width: 250, height: 250 });
-            return; // Skip other movement logic
+            return;
         }
 
         if (isMoving) {
-            // FOCUS MODE: Hover above home
-            if (characterState.isFocusMode && homeWindow) {
+            // Level 0 (Egg) should not move
+            if (playerStats.level === 0) {
+                // Just stay in place (or maybe wobble slightly?)
+                // For now, static as requested.
+            }
+            else if (characterState.isFocusMode && homeWindow) {
+                // ... (Focus Mode Logic)
                 try {
                     const homeBounds = homeWindow.getBounds();
                     const homeCX = homeBounds.x + homeBounds.width / 2;
-                    // Target: Above home
-                    const targetX = homeCX - 155; // Centered horizontally
-                    const targetY = homeBounds.y - 250; // Fixed height above home (increased from 180)
+                    const targetX = homeCX - 125;
+                    const targetY = homeBounds.y - 220;
 
-                    // Add slight hovering motion
                     const hoverOffset = Math.sin(Date.now() / 800) * 15;
-
-                    // Smooth lerp to target
                     const dx = targetX - x;
                     const dy = (targetY + hoverOffset) - y;
 
                     x += dx * 0.05;
                     y += dy * 0.05;
-
-                    // Update vx/vy for consistency
-                    vx = dx * 0.05;
-                    vy = dy * 0.05;
-                } catch (e) {
-                    // Fallback
-                }
+                    vx = dx * 0.05; vy = dy * 0.05;
+                } catch (e) { }
             } else {
-                // NORMAL MODE
+                // NORMAL MODE (Level 1+)
                 x += vx;
                 y += vy;
 
-                // Bounce off edges
-                if (x < 0 || x > width - 250) {
-                    vx *= -1;
-                    x = Math.max(0, Math.min(x, width - 250));
-                }
-                if (y < 0 || y > height - 250) {
-                    vy *= -1;
-                    y = Math.max(0, Math.min(y, height - 250));
-                }
+                let minX = 0, maxX = width - 250;
+                let minY = 0, maxY = height - 250;
 
-                // Occasional change in direction
+                if (x < minX || x > maxX) { vx *= -1; x = Math.max(minX, Math.min(x, maxX)); }
+                if (y < minY || y > maxY) { vy *= -1; y = Math.max(minY, Math.min(y, maxY)); }
+
                 if (Math.random() < 0.01) {
                     vx = (Math.random() - 0.5) * 1.5;
                     vy = (Math.random() - 0.5) * 1.5;
                 }
             }
-        }
 
-        // Mouse interference logic
-        const cursor = screen.getCursorScreenPoint();
-        const distance = Math.sqrt(Math.pow(cursor.x - (x + 125), 2) + Math.pow(cursor.y - (y + 125), 2));
+            characterWindow.setBounds({ x: Math.round(x), y: Math.round(y), width: 250, height: 250 });
 
-        if (distance < 150) {
-            isMoving = true;
-            if (Math.random() < 0.05) {
-                vx = (cursor.x - (x + 125)) / 10;
-                vy = (cursor.y - (y + 125)) / 10;
-            } else if (Math.random() < 0.1) {
-                vx = (x + 125 - cursor.x) / 10;
-                vy = (y + 125 - cursor.y) / 10;
+            // Notify play window
+            if (playWindow) {
+                playWindow.webContents.send('character-moved', { x, y, width: 250, height: 250 });
             }
         }
-
-        characterWindow.setBounds({ x: Math.round(x), y: Math.round(y), width: 250, height: 250 });
-    }, 30);
+    }, 16); // 60fps
 
     characterWindow.on('closed', () => {
         characterWindow = null;
-        clearInterval(movementToggle);
         clearInterval(movementLoop);
+        clearInterval(movementToggle);
+
+        // If play window is open, close it too? No, keep it.
     });
 }
 
@@ -285,199 +309,370 @@ function createTray() {
     tray = new Tray(icon);
 
     const contextMenu = Menu.buildFromTemplate([
-        { label: 'CynicalFloater', enabled: false },
-        { type: 'separator' },
         {
-            label: '메인 화면 열기',
-            click: () => {
-                if (currentUser) {
-                    if (mainWindow) {
-                        mainWindow.show();
-                    } else {
-                        createMainWindow();
-                    }
-                }
+            label: '메인 화면 열기', click: () => {
+                if (mainWindow) mainWindow.show();
+                else createMainWindow();
             }
         },
         {
-            label: '캐릭터 보이기/숨기기',
-            click: () => {
-                if (characterWindow) {
-                    characterWindow.close();
-                } else {
-                    createCharacterWindow();
-                }
+            label: '캐릭터 보이기/숨기기', click: () => {
+                if (homeWindow) homeWindow.webContents.send('toggle-character');
             }
         },
-        { type: 'separator' },
         { label: '종료', click: () => app.quit() }
     ]);
 
-    tray.setToolTip('CynicalFloater - 냉소적인 데스크탑 펫');
+    tray.setToolTip('Cynical Floater');
     tray.setContextMenu(contextMenu);
 }
 
 // ==================== IPC HANDLERS ====================
 
-// Close app
-ipcMain.on('close-app', () => {
-    app.quit();
-});
+ipcMain.on('close-app', () => app.quit());
 
-// Google Login (simplified - in production, use proper OAuth)
-ipcMain.on('google-login', () => {
-    // For now, simulate login success
-    // In production, you would open a OAuth window and get the token
-    currentUser = {
-        id: 'user_123',
-        google_sub: 'google_sub_123',
-        nickname: '테스트 유저',
-        email: 'test@example.com'
-    };
-
-    console.log('User logged in:', currentUser.nickname);
-
-    // Close login window and open main window
-    if (loginWindow) {
-        loginWindow.close();
-    }
-    createMainWindow();
-});
-
-// Logout
-ipcMain.on('logout', () => {
-    currentUser = null;
-
-    // Close all windows except login
-    if (mainWindow) mainWindow.close();
-    if (homeWindow) homeWindow.close();
-    if (characterWindow) characterWindow.close();
-
-    createLoginWindow();
-});
-
-// Get user info
 ipcMain.handle('get-user-info', () => {
     return currentUser;
 });
 
-// Start game - minimize main window, show home icon
-ipcMain.on('start-game', () => {
-    console.log('Game started!');
+ipcMain.on('google-login', () => {
+    currentUser = {
+        id: '12345',
+        nickname: '테스트 유저',
+        email: 'test@example.com'
+    };
+    // Load persisted data
+    loadUserData();
 
-    // Hide main window
-    if (mainWindow) {
-        mainWindow.hide();
-    }
-
-    // Show home icon at bottom-left
-    if (!homeWindow) {
-        createHomeWindow();
-    } else {
-        homeWindow.show();
-    }
+    console.log('User logged in:', currentUser.nickname);
+    if (loginWindow) loginWindow.close();
+    createMainWindow();
+    createTray();
 });
 
-// Show main window
-ipcMain.on('show-main-window', () => {
-    console.log('Show main window');
-    if (currentUser) {
-        // Close character and home windows
-        if (characterWindow) {
-            try {
-                characterWindow.close();
-            } catch (e) { }
-        }
-        if (homeWindow) {
-            try {
-                homeWindow.close();
-            } catch (e) { }
-        }
+ipcMain.on('logout', () => {
+    currentUser = null;
+    isGameRunning = false;
+    if (mainWindow) mainWindow.close();
+    if (characterWindow) characterWindow.close();
+    if (homeWindow) homeWindow.close();
+    if (tray) tray.destroy();
+    if (playWindow) playWindow.close();
+    createLoginWindow();
+});
 
+ipcMain.on('start-game', () => {
+    isGameRunning = true;
+    if (mainWindow) mainWindow.hide();
+    if (!homeWindow) createHomeWindow();
+    else homeWindow.show();
+});
+
+ipcMain.on('show-main-window', () => {
+    if (currentUser) {
         if (mainWindow) {
             mainWindow.show();
+            mainWindow.webContents.send('update-ui-state', { isGameRunning });
         } else {
             createMainWindow();
+            mainWindow.webContents.on('did-finish-load', () => {
+                mainWindow.webContents.send('update-ui-state', { isGameRunning });
+            });
         }
     }
 });
 
-// Toggle Focus Mode
 ipcMain.on('toggle-focus-mode', (event, isFocusOn) => {
-    console.log('Focus Mode:', isFocusOn);
     characterState.isFocusMode = isFocusOn;
 });
 
-// Toggle character visibility
 ipcMain.on('toggle-character', () => {
-    console.log('Toggle character');
-
     if (characterWindow) {
         if (!characterState.isReturningHome) {
-            console.log('Returning home...');
             characterState.isReturningHome = true;
         }
     } else {
-        // Spawn near home
-        if (homeWindow) {
-            try {
-                const homeBounds = homeWindow.getBounds();
-                // Calc spawn pos: Center of character matches Center of home
-                // Character: 250x250, Home: 140x140
-                const spawnX = Math.round((homeBounds.x + homeBounds.width / 2) - 125);
-                const spawnY = Math.round((homeBounds.y + homeBounds.height / 2) - 125);
-
-                // Spawn slightly above initially to look like it pops out
-                createCharacterWindow(spawnX, spawnY - 50);
-            } catch (e) {
-                createCharacterWindow();
-            }
-        } else {
-            createCharacterWindow();
-        }
+        createCharacterWindow();
     }
 });
 
-// Handle mouse ignore for character window
 ipcMain.on('set-ignore-mouse', (event, ignore) => {
     if (characterWindow) {
         characterWindow.setIgnoreMouseEvents(ignore, { forward: true });
     }
 });
 
-// Handle destructive actions
 ipcMain.on('destructive-action', (event, type) => {
     if (type === 'alt-f4') {
-        console.log('Simulating Alt+F4');
         const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%{F4}')`;
         exec(`powershell -Command "${script}"`);
     } else if (type === 'minimize-window') {
-        console.log('Minimizing a window');
-        const minimizeActive = `
-            $wshell = New-Object -ComObject WScript.Shell;
-            $wshell.SendKeys('% n');
-        `;
+        const minimizeActive = `$wshell = New-Object -ComObject WScript.Shell; $wshell.SendKeys('% n');`;
         exec(`powershell -Command "${minimizeActive}"`);
     }
 });
 
+// ==================== EVOLUTION SYSTEM ====================
+
+ipcMain.handle('get-current-image', () => {
+    return playerStats.characterImage;
+});
+
+let clickResetTimer = null;
+
+ipcMain.on('egg-clicked', () => {
+    if (playerStats.level !== 0) return;
+
+    // Reset the reset timer
+    if (clickResetTimer) clearTimeout(clickResetTimer);
+
+    playerStats.clickCount = (playerStats.clickCount || 0) + 1;
+    console.log(`Egg clicked: ${playerStats.clickCount}`);
+
+    if (playerStats.clickCount === 15) {
+        // Crack the egg
+        playerStats.characterImage = path.join(__dirname, 'assets/level0/level0_cracked.png');
+        if (characterWindow) characterWindow.webContents.send('update-image', playerStats.characterImage);
+        if (mainWindow) mainWindow.webContents.send('update-image', playerStats.characterImage);
+    } else if (playerStats.clickCount >= 30) {
+        // Evolve to Level 1
+        evolveCharacter(1);
+        return; // Don't set reset timer if evolved
+    }
+
+    saveUserData();
+
+    // Set timer to reset clicks if user stops
+    clickResetTimer = setTimeout(() => {
+        if (playerStats.level === 0 && playerStats.clickCount > 0) {
+            console.log('Click streak broken. Resetting egg.');
+            playerStats.clickCount = 0;
+            playerStats.characterImage = path.join(__dirname, 'assets/level0/level0.png');
+            if (characterWindow) characterWindow.webContents.send('update-image', playerStats.characterImage);
+            if (mainWindow) mainWindow.webContents.send('update-image', playerStats.characterImage);
+            saveUserData();
+        }
+    }, 3000); // 3 seconds timeout
+});
+
+function evolveCharacter(targetLevel) {
+    console.log(`[Evolution] Attempting to evolve to Level ${targetLevel}...`);
+
+    const levelDir = path.join(__dirname, `assets/level${targetLevel}`);
+    console.log(`[Evolution] Checking directory: ${levelDir}`);
+
+    // 1. Get subdirectories
+    fs.readdir(levelDir, { withFileTypes: true }, (err, dirents) => {
+        if (err) {
+            console.error('[Evolution] Failed to read level dir:', err);
+            return;
+        }
+
+        const charFolders = dirents.filter(d => d.isDirectory()).map(d => d.name);
+        console.log(`[Evolution] Found folders: ${charFolders.join(', ')}`);
+
+        if (charFolders.length === 0) {
+            console.error(`[Evolution] No character folders found in level ${targetLevel}`);
+            return;
+        }
+
+        // 2. Pick random folder
+        const randomCharName = charFolders[Math.floor(Math.random() * charFolders.length)];
+        const charDir = path.join(levelDir, randomCharName);
+        console.log(`[Evolution] Selected character: ${randomCharName}`);
+
+        // 3. Find image (Prefer 'normal.webp')
+        fs.readdir(charDir, (err, files) => {
+            if (err || files.length === 0) {
+                console.error('[Evolution] Empty character folder:', charDir);
+                return;
+            }
+
+            // Look for normal.webp first
+            let targetImage = files.find(f => f.toLowerCase() === 'normal.webp');
+
+            // Fallback: any image
+            if (!targetImage) {
+                targetImage = files.find(f => f.match(/\.(png|svg|webp|jpg)$/i));
+            }
+
+            if (!targetImage) {
+                console.error('[Evolution] No valid images found in:', charDir);
+                return;
+            }
+
+            const fullPath = path.join(charDir, targetImage);
+            console.log(`[Evolution] Selected image: ${fullPath}`);
+
+            // UPDATE STATS
+            playerStats.level = targetLevel;
+            playerStats.evolutionProgress = 0;
+            playerStats.lastEvolutionTime = Date.now();
+            playerStats.characterImage = fullPath;
+            playerStats.characterName = randomCharName; // Save name
+
+            playerStats.evolutionHistory.push({ level: targetLevel, name: randomCharName, date: Date.now() });
+
+            // Notify Renderer
+            if (characterWindow) {
+                characterWindow.webContents.send('update-image', fullPath);
+                characterWindow.webContents.send('show-speech', '진화했다! ✨');
+                // Force redraw if needed
+                characterWindow.setBounds(characterWindow.getBounds());
+            }
+            if (mainWindow) {
+                mainWindow.webContents.send('update-image', fullPath);
+            }
+
+            saveUserData();
+            console.log(`[Evolution] Success! Level ${targetLevel}`);
+        });
+    });
+}
+
+// Check evolution progress periodically (Level 1+)
+setInterval(() => {
+    if (playerStats.level > 0 && playerStats.level < 3) {
+        // FAST TESTING: 20% every 2 seconds (Evolves in ~10 seconds)
+        playerStats.evolutionProgress = Math.min(100, (playerStats.evolutionProgress || 0) + 20);
+
+        console.log(`[Evolution] Level ${playerStats.level} Progress: ${playerStats.evolutionProgress}%`);
+
+        if (playerStats.evolutionProgress >= 100) {
+            evolveCharacter(playerStats.level + 1);
+        }
+        // Save occasionally? Maybe not every tick to save IO.
+    }
+}, 2000); // Check every 2s
+
+// ==================== PLAY MODE & MINIGAMES ====================
+
+ipcMain.handle('get-player-status', () => {
+    const now = Date.now();
+    const timeSinceLastPlay = now - playerStats.lastPlayTime;
+    const remainingCooldown = Math.max(0, PLAY_COOLDOWN - timeSinceLastPlay);
+
+    // Fallback logic for name
+    let displayName = playerStats.characterName;
+    if (!displayName) {
+        if (playerStats.level === 0) displayName = '알';
+        else {
+            // Extract from path: .../levelN/NAME/normal.webp
+            try {
+                const parts = playerStats.characterImage.split(path.sep);
+                // The folder name is the parent of the image file
+                displayName = parts[parts.length - 2];
+            } catch (e) {
+                displayName = 'Unknown';
+            }
+        }
+    }
+
+    return {
+        happiness: playerStats.happiness,
+        remainingCooldown,
+        characterImage: playerStats.characterImage,
+        level: playerStats.level,
+        characterName: displayName
+    };
+});
+
+ipcMain.handle('start-play-mode', (event, mode) => {
+    const now = Date.now();
+    if (now - playerStats.lastPlayTime < PLAY_COOLDOWN) {
+        return { success: false, message: '아직 놀아줄 수 없습니다. (쿨타임 중)' };
+    }
+
+    if (mainWindow) mainWindow.hide();
+    if (!characterWindow) createCharacterWindow();
+
+    createPlayWindow(mode);
+    return { success: true };
+});
+
+ipcMain.handle('finish-play-mode', () => {
+    playerStats.happiness = Math.min(100, playerStats.happiness + 10);
+    playerStats.lastPlayTime = Date.now();
+    saveUserData(); // Save on change
+    return { happiness: playerStats.happiness };
+});
+
+ipcMain.on('close-play-window', () => {
+    if (playWindow) {
+        playWindow.close();
+        playWindow = null;
+    }
+    if (mainWindow) {
+        mainWindow.show();
+        mainWindow.webContents.send('update-ui-state', { isGameRunning });
+    }
+});
+
+ipcMain.on('ball-position', (event, { x, y }) => {
+    if (characterWindow) {
+        characterWindow.ballTarget = { x, y }; // Use this in movement logic if advanced physics needed
+        // For now, simpler: Just move character towards ball instantly or specific logic
+        // But since movement is controlled by loop, we can hijack it:
+        // Let's add 'ballChasing' state or just override x,y for a bit
+        // Actually, just updating target logic in loop is best, but loop is strict.
+
+        // Just let it be for now, visual feedback is mostly in play overlay
+    }
+});
+
+ipcMain.on('food-eaten', () => {
+    if (characterWindow) {
+        characterWindow.webContents.send('show-speech', '존맛탱! 🍖');
+    }
+});
+
+function createPlayWindow(mode) {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.bounds;
+
+    playWindow = new BrowserWindow({
+        width: width,
+        height: height,
+        x: 0,
+        y: 0,
+        transparent: true,
+        frame: false,
+        fullscreen: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+        },
+    });
+
+    playWindow.loadFile('play-overlay.html');
+    playWindow.webContents.on('did-finish-load', () => {
+        let startPos = null;
+        if (characterWindow) {
+            const bounds = characterWindow.getBounds();
+            startPos = { x: bounds.x, y: bounds.y };
+            characterWindow.hide();
+        }
+        playWindow.webContents.send('init-game', {
+            mode,
+            startPos,
+            characterImage: playerStats.characterImage
+        });
+    });
+    playWindow.on('closed', () => {
+        playWindow = null;
+        if (characterWindow) characterWindow.show();
+    });
+}
+
 // ==================== APP LIFECYCLE ====================
 app.whenReady().then(() => {
     createLoginWindow();
-    createTray();
-
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            if (currentUser) {
-                createMainWindow();
-            } else {
-                createLoginWindow();
-            }
-        }
-    });
 });
 
 app.on('window-all-closed', () => {
-    // Don't quit when all windows are closed - keep tray icon running
-    // User can quit from tray menu
+    if (process.platform !== 'darwin') {
+        app.quit();
+    }
 });
