@@ -393,6 +393,8 @@
             </div>
         </div>
 
+        <button class="start-btn" id="reset-btn" style="display: none; background: #333; margin-bottom: 10px;">새로운 펫
+            입양하기</button>
         <button class="start-btn" id="start-btn">Start</button>
         <button class="play-btn" id="play-btn">놀아주기 (준비중)</button>
 
@@ -459,11 +461,15 @@
                     charImg.classList.add('dead-character');
                     deathMsg.style.display = 'block';
                     if (pBtn) pBtn.style.display = 'none';
+                    document.getElementById('reset-btn').style.display = 'block';
+                    document.getElementById('start-btn').style.display = 'none';
                     document.getElementById('character-name').textContent = `† ${stats.characterName} †`;
                 } else {
                     charImg.classList.remove('dead-character');
                     deathMsg.style.display = 'none';
                     if (pBtn) pBtn.style.display = 'inline-block';
+                    document.getElementById('reset-btn').style.display = 'none';
+                    document.getElementById('start-btn').style.display = 'inline-block';
                 }
 
                 // Update Evolution Bar
@@ -481,9 +487,12 @@
                     evoContainer.style.display = 'none';
                 }
 
-                // Update Play Button (Cooldown)
+                // Update Play Button (Cooldown & Level Check)
                 const playBtn = document.getElementById('play-btn');
-                if (stats.remainingCooldown > 0) {
+                if (stats.level === 0) {
+                    playBtn.disabled = true;
+                    playBtn.textContent = '놀아주기 (부화 필요)';
+                } else if (stats.remainingCooldown > 0) {
                     playBtn.disabled = true;
                     const min = Math.ceil(stats.remainingCooldown / 60000);
                     playBtn.textContent = `놀아주기 (${min}분)`;
@@ -508,6 +517,12 @@
 
         document.getElementById('start-btn').addEventListener('click', () => {
             ipcRenderer.send('start-game');
+        });
+
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            ipcRenderer.invoke('reset-game').then(() => {
+                updateStats();
+            });
         });
 
         document.getElementById('close-btn').addEventListener('click', () => {

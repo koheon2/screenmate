@@ -15,55 +15,58 @@ let tray = null;
 // User state
 let currentUser = null;
 let isGameRunning = false;
-let playerStats = {
-    happiness: 50,
-    lastPlayTime: 0, // Timestamp
-
-};
+let playerStats = null;
+let petHistory = []; // Archive for dead pets
 // 5 minutes cooldown (Disabled for testing)
 const PLAY_COOLDOWN = 0;
 const userDataPath = path.join(app.getPath('userData'), 'user-data.json');
 
-function loadUserData() {
-    // Default initial stats
-    const defaults = {
-        happiness: 50,
-        lastPlayTime: 0,
-        level: 0,
-        clickCount: 0,
-        evolutionProgress: 0,
-        characterImage: path.join(__dirname, 'assets/level0/level0.png'),
-        evolutionHistory: [],
-        lastEvolutionTime: Date.now(),
-        hp: 100,
-        lastFedTime: Date.now(),
-        lastHungerDamageTime: Date.now()
-    };
+const INITIAL_STATS = {
+    happiness: 50,
+    lastPlayTime: 0,
+    level: 0,
+    clickCount: 0,
+    evolutionProgress: 0,
+    characterImage: path.join(__dirname, 'assets/level0/level0.png'),
+    evolutionHistory: [],
+    lastEvolutionTime: Date.now(),
+    hp: 100,
+    lastFedTime: Date.now(),
+    lastHungerDamageTime: Date.now()
+};
 
-    playerStats = defaults;
+function loadUserData() {
+    playerStats = { ...INITIAL_STATS };
+    petHistory = [];
 
     try {
         if (fs.existsSync(userDataPath)) {
-            const data = JSON.parse(fs.readFileSync(userDataPath, 'utf8'));
-            if (data) {
-                // Merge loaded data with defaults to ensure new fields exist
-                playerStats = { ...defaults, ...data };
-                console.log('Loaded user data:', playerStats);
+            const fileData = JSON.parse(fs.readFileSync(userDataPath, 'utf8'));
+            if (fileData) {
+                if (fileData.activePet) {
+                    // New nested format
+                    playerStats = { ...INITIAL_STATS, ...fileData.activePet };
+                    petHistory = fileData.petHistory || [];
+                } else {
+                    // Old flat format (migration)
+                    playerStats = { ...INITIAL_STATS, ...fileData };
+                }
+                console.log('Loaded user data. Active Pet:', playerStats.characterName, 'History count:', petHistory.length);
             }
         }
     } catch (e) {
         console.error('Failed to load user data:', e);
     }
-
-    // FORCE HP TO 0 FOR TESTING DEATH LOGIC
-    playerStats.hp = 0;
-    saveUserData();
 }
 
 function saveUserData() {
     try {
-        fs.writeFileSync(userDataPath, JSON.stringify(playerStats), 'utf8');
-        console.log('Saved user data');
+        const dataToSave = {
+            activePet: playerStats,
+            petHistory: petHistory
+        };
+        fs.writeFileSync(userDataPath, JSON.stringify(dataToSave, null, 2), 'utf8');
+        console.log('Saved user data (including history)');
     } catch (e) {
         console.error('Failed to save user data:', e);
     }
@@ -110,6 +113,26 @@ function createMainWindow() {
 
     mainWindow.on('closed', () => mainWindow = null);
 }
+
+ipcMain.handle('reset-game', () => {
+    // 1. Archive current dead pet into history
+    if (playerStats) {
+        // Add death timestamp or mark it
+        const deadPet = { ...playerStats, deathTime: Date.now() };
+        petHistory.push(deadPet);
+    }
+
+    // 2. Reset to initial state for a NEW pet
+    playerStats = {
+        ...INITIAL_STATS,
+        lastEvolutionTime: Date.now(),
+        lastFedTime: Date.now(),
+        lastHungerDamageTime: Date.now()
+    };
+
+    saveUserData();
+    return { success: true };
+});
 
 function handleDeath() {
     if (characterWindow) {
