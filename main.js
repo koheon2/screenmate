@@ -279,7 +279,7 @@ async function updateCharacterInDB(characterId, updates, isRetry = false) {
         const response = await axios.patch(`${API_BASE_URL}/characters/${characterId}`, updates, {
             headers: getAuthHeader()
         });
-        console.log('Character updated in DB');
+        // console.log('Character updated in DB');
         return response.data;
     } catch (err) {
         if (err.response && (err.response.status === 401 || err.response.status === 403) && !isRetry) {
@@ -1492,7 +1492,7 @@ setInterval(async () => {
 
                     if (sources.length > 0) {
                         // Use the first screen (primary)
-                        screenshotBuffer = sources[0].thumbnail.toPNG();
+                        // screenshotBuffer = sources[0].thumbnail.toPNG();
                         // console.log('Screenshot captured for LLM context');
                     }
                 } catch (e) {
