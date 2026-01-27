@@ -123,10 +123,14 @@ character.addEventListener('mouseleave', () => {
     ipcRenderer.send('set-ignore-mouse', true);
 });
 
-character.addEventListener('click', () => {
-    ipcRenderer.send('egg-clicked');
+character.addEventListener('click', async () => {
+    const stats = await ipcRenderer.invoke('get-player-status');
+    if (stats?.level > 0 && stats?.dbCharacterId) {
+        ipcRenderer.send('open-chat-window');
+        return;
+    }
 
-    // Vibrate effect on click
+    ipcRenderer.send('egg-clicked');
     character.classList.add('click-vibrate');
     setTimeout(() => character.classList.remove('click-vibrate'), 200);
 });

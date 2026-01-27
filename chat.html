@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat</title>
+    <style>
+        body {
+            margin: 0;
+            background: transparent;
+            font-family: "Noto Sans KR", system-ui, -apple-system, sans-serif;
+        }
+
+        .panel {
+            margin: 0;
+            padding: 8px;
+            border: 2px solid #111;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.98);
+            box-shadow: 3px 3px 0 #111;
+        }
+
+        .input {
+            width: 100%;
+            box-sizing: border-box;
+            border: 2px solid #111;
+            border-radius: 8px;
+            padding: 7px 9px;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .actions {
+            margin-top: 6px;
+            display: flex;
+            gap: 6px;
+        }
+
+        .btn {
+            flex: 1;
+            border: 2px solid #111;
+            border-radius: 8px;
+            padding: 6px 8px;
+            cursor: pointer;
+            font-weight: 800;
+            background: #ffd166;
+        }
+
+        .btn.secondary {
+            background: #fff;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="panel">
+        <input id="chat-input" class="input" maxlength="200" placeholder="말 걸어봐..." />
+        <div class="actions">
+            <button id="chat-send" class="btn">보내기</button>
+            <button id="chat-close" class="btn secondary">닫기</button>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        const input = document.getElementById('chat-input');
+        const send = document.getElementById('chat-send');
+        const closeBtn = document.getElementById('chat-close');
+
+        function focusInput() {
+            setTimeout(() => input.focus(), 10);
+        }
+
+        ipcRenderer.on('chat-focus', focusInput);
+
+        async function submit() {
+            const message = (input.value || '').trim();
+            if (!message) return;
+            send.disabled = true;
+            send.textContent = "...";
+            try {
+                await ipcRenderer.invoke('llm-chat', { message });
+                window.close();
+            } finally {
+                send.disabled = false;
+                send.textContent = "보내기";
+            }
+        }
+
+        send.addEventListener('click', submit);
+        closeBtn.addEventListener('click', () => window.close());
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                window.close();
+            }
+        });
+
+        focusInput();
+    </script>
+</body>
+
+</html>
+

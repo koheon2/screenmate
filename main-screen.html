@@ -127,7 +127,14 @@
             font-size: 18px;
             font-weight: 600;
             color: #333;
-            margin-bottom: 15px;
+            margin-bottom: 4px;
+        }
+
+        .character-intimacy {
+            font-size: 12px;
+            font-weight: 700;
+            color: #6a4c00;
+            margin-bottom: 12px;
         }
 
         .start-btn {
@@ -756,6 +763,7 @@
         </div>
 
         <p class="character-name" id="character-name">쿠치파치</p>
+        <div class="character-intimacy" id="character-intimacy">친밀도 0.0</div>
 
         <!-- Happiness Bar -->
         <div class="happiness-container">
@@ -1304,6 +1312,8 @@
                 if (stats.characterName) {
                     document.getElementById('character-name').textContent = `${stats.characterName} (Lv.${stats.level})`;
                 }
+                const intimacy = typeof stats.intimacyScore === 'number' ? stats.intimacyScore : 0;
+                document.getElementById('character-intimacy').textContent = `친밀도 ${intimacy.toFixed(1)}`;
 
                 // Update HP Bar
                 const hp = stats.hp !== undefined ? stats.hp : 100;
@@ -1322,12 +1332,14 @@
                     document.getElementById('reset-btn').style.display = 'block';
                     document.getElementById('start-btn').style.display = 'none';
                     document.getElementById('character-name').textContent = `† ${stats.characterName} †`;
+                    document.getElementById('character-intimacy').style.opacity = '0.6';
                 } else {
                     charImg.classList.remove('dead-character');
                     deathMsg.style.display = 'none';
                     if (pBtn) pBtn.style.display = 'inline-block';
                     document.getElementById('reset-btn').style.display = 'none';
                     document.getElementById('start-btn').style.display = 'inline-block';
+                    document.getElementById('character-intimacy').style.opacity = '1';
                 }
 
                 // Update Evolution Bar

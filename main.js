@@ -57,6 +57,7 @@ let mainWindow = null;
 let homeWindow = null;
 let houseWindow = null;
 let characterWindow = null;
+let chatWindow = null;
 let playWindow = null;
 let petGameWindow = null;
 let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false, isSleeping: false };
@@ -162,6 +163,7 @@ const INITIAL_STATS = {
     sleepModeActive: false,
     wokeUpEarlyDate: null,
     gender: null,
+    intimacyScore: 0,
     pendingLineageParents: null,
     lineageCreated: false,
     localUpdatedAt: 0,
@@ -575,6 +577,7 @@ function applyServerCharacterToLocal(me) {
     if (typeof me.stageIndex === 'number') playerStats.level = me.stageIndex;
     if (typeof me.happiness === 'number') playerStats.happiness = me.happiness;
     if (typeof me.health === 'number') playerStats.hp = me.health;
+    if (typeof me.intimacyScore === 'number') playerStats.intimacyScore = me.intimacyScore;
     if (me.lastFedAt) playerStats.lastFedTime = new Date(me.lastFedAt).getTime();
     if (me.lastPlayedAt) playerStats.lastPlayTime = new Date(me.lastPlayedAt).getTime();
     if (me.homePlaceId && HOUSE_IDS.includes(me.homePlaceId)) {
@@ -872,6 +875,35 @@ async function callLlmApi(characterId, userMessage, context, screenshotBuffer, i
         return null;
     }
 }
+
+ipcMain.handle('llm-chat', async (event, { message } = {}) => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) {
+            return { success: false, message: '캐릭터 동기화가 아직 안 됐어.' };
+        }
+        const text = (message || '').trim();
+        if (!text) {
+            return { success: false, message: '메시지를 입력해줘.' };
+        }
+
+        const res = await callLlmApi(characterId, text, '', null);
+        if (res?.message) {
+            if (characterWindow && !characterWindow.isDestroyed()) {
+                characterWindow.webContents.send('show-speech', res.message);
+            }
+            if (typeof res.intimacyScore === 'number') {
+                playerStats.intimacyScore = res.intimacyScore;
+                // Server is source of truth for intimacy.
+                saveUserData({ touchLocalUpdatedAt: false });
+            }
+            return { success: true, data: res };
+        }
+        return { success: false, message: '응답을 받지 못했어.' };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
 
 // Sync local character to DB
 async function syncCharacterToDB() {
@@ -1224,6 +1256,65 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false) {
 }
 
 // ==================== CHARACTER WINDOW ====================
+const CHAT_WINDOW_WIDTH = 280;
+const CHAT_WINDOW_HEIGHT = 128;
+const CHAT_WINDOW_OFFSET_Y = -6;
+
+function positionChatWindow() {
+    if (!chatWindow || !characterWindow) return;
+    const bounds = characterWindow.getBounds();
+    const x = Math.round(bounds.x + (bounds.width - CHAT_WINDOW_WIDTH) / 2);
+    const y = Math.round(bounds.y + bounds.height + CHAT_WINDOW_OFFSET_Y);
+    chatWindow.setBounds({ x, y, width: CHAT_WINDOW_WIDTH, height: CHAT_WINDOW_HEIGHT });
+}
+
+function closeChatWindow() {
+    if (!chatWindow) return;
+    try {
+        chatWindow.close();
+    } catch (e) { }
+    chatWindow = null;
+}
+
+function createChatWindow() {
+    if (!characterWindow) return;
+    if (chatWindow && !chatWindow.isDestroyed()) {
+        positionChatWindow();
+        chatWindow.show();
+        chatWindow.focus();
+        return;
+    }
+
+    chatWindow = new BrowserWindow({
+        width: CHAT_WINDOW_WIDTH,
+        height: CHAT_WINDOW_HEIGHT,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        resizable: false,
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+        }
+    });
+    chatWindow.setAlwaysOnTop(true, 'screen-saver');
+    chatWindow.moveTop();
+    chatWindow.loadFile('chat.html');
+    chatWindow.webContents.on('did-finish-load', () => {
+        positionChatWindow();
+        chatWindow.show();
+        chatWindow.focus();
+        try {
+            chatWindow.webContents.send('chat-focus');
+        } catch (e) { }
+    });
+    chatWindow.on('closed', () => {
+        chatWindow = null;
+    });
+}
+
 function createCharacterWindow() {
     playerStats.awayModeActive = false;
     // Determine spawn position
@@ -1349,6 +1440,7 @@ function createCharacterWindow() {
             y += vy;
 
             characterWindow.setBounds({ x: Math.round(x), y: Math.round(y), width: 250, height: 250 });
+            positionChatWindow();
             return;
         }
 
@@ -1392,6 +1484,7 @@ function createCharacterWindow() {
             }
 
             characterWindow.setBounds({ x: Math.round(x), y: Math.round(y), width: 250, height: 250 });
+            positionChatWindow();
 
             // Notify play window
             if (playWindow) {
@@ -1404,6 +1497,7 @@ function createCharacterWindow() {
         characterWindow = null;
         clearInterval(movementLoop);
         clearInterval(movementToggle);
+        closeChatWindow();
 
         // If play window is open, close it too? No, keep it.
     });
@@ -1675,6 +1769,7 @@ ipcMain.on('open-house-viewer', (event, payload = {}) => {
     }
     if (characterWindow && !characterState.isReturningHome) {
         characterState.isReturningHome = true;
+        closeChatWindow();
     }
     const placeId = payload.placeId || 'home';
     const isNewPlace = !!payload.isNew;
@@ -1693,10 +1788,15 @@ ipcMain.on('toggle-focus-mode', (event, isFocusOn) => {
     characterState.isFocusMode = isFocusOn;
 });
 
+ipcMain.on('open-chat-window', () => {
+    createChatWindow();
+});
+
 ipcMain.on('toggle-character', () => {
     if (characterWindow) {
         if (!characterState.isReturningHome) {
             characterState.isReturningHome = true;
+            closeChatWindow();
         }
     } else {
         recomputeSleepMode(new Date());
@@ -2105,6 +2205,7 @@ setInterval(() => {
         console.log(`[Status] Sleep Mode Changed: ${sleepModeActive}`);
         if (sleepModeActive && characterWindow && !characterState.isReturningHome) {
             characterState.isReturningHome = true;
+            closeChatWindow();
         }
         updateDynamicImage();
         saveUserData();
@@ -2132,12 +2233,12 @@ setInterval(() => {
     saveUserData();
 }, 60000); // Check every 1 minute
 
-// LLM speech bubble timer (every 10 seconds)
+// LLM speech bubble timer (every 2 minutes)
 setInterval(async () => {
     // Debug Log
     // console.log(`[Timer] Tick. GameRunning: ${isGameRunning}, DB_ID: ${playerStats?.dbCharacterId ? 'YES' : 'NO'}`);
 
-    // Call LLM every 10 seconds
+    // Call LLM every 2 minutes
     if (playerStats && isGameRunning) {
 
         // If not linked to DB yet, try syncing first
@@ -2176,12 +2277,16 @@ setInterval(async () => {
                 }
 
                 // 전형적인 400 에러를 피하기 위해 가장 강력한 형태의 JSON 지시어와 예시 구조를 보냅니다.
-                const userPrompt = "Respond ONLY with a valid JSON object. No markdown, no pre-text. Structure: {\"message\": \"string\", \"actions\": [], \"qaPatch\": {}, \"emotion\": \"string\"}";
+                const userPrompt = "Respond ONLY with a valid JSON object. No markdown, no pre-text. Structure: {\"message\": \"string\", \"actions\": [], \"emotion\": \"string\", \"intimacyDelta\": 0}";
                 const llmResponse = await callLlmApi(playerStats.dbCharacterId, userPrompt, context, screenshotBuffer);
 
                 if (llmResponse && llmResponse.message) {
                     if (characterWindow && !characterWindow.isDestroyed()) {
                         characterWindow.webContents.send('show-speech', llmResponse.message);
+                    }
+                    if (typeof llmResponse.intimacyScore === 'number') {
+                        playerStats.intimacyScore = llmResponse.intimacyScore;
+                        saveUserData({ touchLocalUpdatedAt: false });
                     }
                 }
             } catch (err) {
@@ -2192,7 +2297,7 @@ setInterval(async () => {
             syncCharacterToDB();
         }
     }
-}, 10000);
+}, 120000);
 
 // ==================== PLAY MODE & MINIGAMES ====================
 
@@ -2446,7 +2551,9 @@ ipcMain.handle('get-player-status', () => {
         remainingCooldown,
         characterImage,
         level: playerStats.level,
+        dbCharacterId: playerStats.dbCharacterId || null,
         characterName: koreanName,
+        intimacyScore: playerStats.intimacyScore ?? 0,
         evolutionProgress: playerStats.evolutionProgress || 0,
         hp: (playerStats.hp !== undefined) ? playerStats.hp : 100,
         discoveredPlaces
