@@ -1257,13 +1257,19 @@ setInterval(() => {
     }
 
     // Check Sleep Time (23:00 ~ 06:00)
-    // Check Sleep Time (Testing: 15:00 ~ 06:00)
+    // Check Sleep Time (00:00 ~ 06:00)
     const currentHour = new Date().getHours();
-    const shouldSleep = (currentHour >= 15 || currentHour < 6);
+    // Midnight (00:00) to 06:00
+    const shouldSleep = (currentHour < 6);
     if (characterState.isSleeping !== shouldSleep) {
         characterState.isSleeping = shouldSleep;
         console.log(`[Status] Sleep State Changed: ${shouldSleep}`);
         updateDynamicImage(); // Update image immediately
+
+        // Say something when falling asleep
+        if (shouldSleep && characterWindow) {
+            characterWindow.webContents.send('show-speech', '아 졸려...');
+        }
     }
 
     // 2. Evolution Progress (Level 1+)
@@ -1282,7 +1288,7 @@ setInterval(() => {
     }
 
     saveUserData();
-}, 3000); // Check every 3 seconds (Testing)
+}, 60000); // Check every 1 minute
 
 // LLM speech bubble timer (every 10 seconds)
 setInterval(async () => {
