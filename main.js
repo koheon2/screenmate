@@ -69,6 +69,8 @@ let isGameRunning = false;
 let playerStats = null;
 let petHistory = []; // Archive for dead pets
 let bootstrapCache = null;
+let friendsCache = [];
+let friendsCacheAt = 0;
 // 5 minutes cooldown (Disabled for testing)
 // 5 minutes cooldown (Disabled for testing)
 const PLAY_COOLDOWN = 0;
@@ -93,6 +95,7 @@ const PLACES = [
     { id: 'park', name: '공원', icon: '🌿', model: 'park.glb' },
     { id: 'park2', name: '공원 2', icon: '🌿', model: 'park2.glb' },
     { id: 'bakery', name: '빵집', icon: '🥐', model: 'bakery.glb' },
+    { id: 'cafe', name: '카페', icon: '☕', model: 'cafe.glb' },
     { id: 'pharmacy', name: '약국', icon: '💊', model: 'pharmacy.glb' },
     { id: 'bank', name: '은행', icon: '🏦', model: 'bank.glb' },
     { id: 'school', name: '학교', icon: '🏫', model: 'school.glb' },
@@ -164,6 +167,20 @@ const INITIAL_STATS = {
     wokeUpEarlyDate: null,
     gender: null,
     intimacyScore: 0,
+    feedCount: 0,
+    forcedAwayPlaceId: null,
+    forcedAwayReason: null,
+    forcedAwayMeta: null,
+    pendingPoliceAfterBank: false,
+    cafePending: false,
+    schoolLastDate: null,
+    park2UsedFriendIds: [],
+    achievements: {},
+    visibleAccumMillis: 0,
+    visibleLastTickAt: 0,
+    sickModeActive: false,
+    sickAnnounced: false,
+    sickRecovered: false,
     pendingLineageParents: null,
     lineageCreated: false,
     localUpdatedAt: 0,
@@ -241,6 +258,188 @@ function pickAwayPlace() {
     return getPlaceById('park');
 }
 
+function addDiscoveredPlace(placeId) {
+    if (!playerStats) return;
+    const discovered = new Set(playerStats.discoveredPlaces || []);
+    discovered.add(placeId);
+    playerStats.discoveredPlaces = Array.from(discovered);
+}
+
+async function upsertAchievementInDB(achievementId, label) {
+    if (!ENABLE_DB_SYNC || !global.authTokens) return;
+    try {
+        await apiRequest({
+            method: 'PUT',
+            url: `${API_BASE_URL}/users/me/achievements/${achievementId}`,
+            data: {
+                progress: 1,
+                unlockedAt: new Date().toISOString(),
+                metadata: label ? { label } : null
+            }
+        });
+    } catch (err) {
+        // Best-effort; missing defs or network failures shouldn't break gameplay.
+    }
+}
+
+function markAchievement(key, label) {
+    if (!playerStats) return;
+    playerStats.achievements = playerStats.achievements || {};
+    if (playerStats.achievements[key]) return;
+    playerStats.achievements[key] = {
+        label,
+        achievedAt: Date.now()
+    };
+    recordCharacterEvent('MILESTONE', `업적 달성: ${label}`, { achievementKey: key });
+    upsertAchievementInDB(key, label);
+}
+
+function clearForcedAway() {
+    if (!playerStats) return;
+    playerStats.forcedAwayPlaceId = null;
+    playerStats.forcedAwayReason = null;
+    playerStats.forcedAwayMeta = null;
+    playerStats.awayModeActive = false;
+}
+
+function setForcedAway(placeId, reason, meta = null) {
+    if (!playerStats || !placeId) return;
+    playerStats.forcedAwayPlaceId = placeId;
+    playerStats.forcedAwayReason = reason;
+    playerStats.forcedAwayMeta = meta;
+    playerStats.awayModeActive = true;
+    saveUserData();
+
+    if (characterWindow && !characterState.isReturningHome) {
+        characterState.isReturningHome = true;
+        closeChatWindow();
+    }
+    if (homeWindow) {
+        homeWindow.webContents.send('home-speech', '...');
+    }
+}
+
+function isWeekdaySchoolHours(now = new Date()) {
+    const day = now.getDay();
+    const hour = now.getHours();
+    const weekday = day >= 1 && day <= 5;
+    return weekday && hour >= 9 && hour < 17;
+}
+
+function isCharacterVisibleOut() {
+    return !!(characterWindow && !characterState.isReturningHome);
+}
+
+function ensureSickForcedAway() {
+    if (!playerStats?.sickModeActive) return;
+    if (playerStats.forcedAwayPlaceId !== 'pharmacy') {
+        playerStats.forcedAwayPlaceId = 'pharmacy';
+        playerStats.forcedAwayReason = 'PHARMACY';
+        playerStats.awayModeActive = true;
+        saveUserData({ touchLocalUpdatedAt: false });
+    }
+}
+
+function triggerSickMode() {
+    if (!playerStats || playerStats.sickModeActive) return;
+    playerStats.sickModeActive = true;
+    playerStats.sickAnnounced = true;
+    playerStats.sickRecovered = false;
+    ensureSickForcedAway();
+    saveUserData({ touchLocalUpdatedAt: false });
+    if (characterWindow && !characterWindow.isDestroyed()) {
+        characterWindow.webContents.send('set-emotion', 'sad');
+        characterWindow.webContents.send('show-speech', '나 조금 아픈거같아..콜록콜록');
+    }
+}
+
+function getEligiblePark2FriendId() {
+    const used = new Set(playerStats?.park2UsedFriendIds || []);
+    const eligible = friendsCache.find((f) => (f.intimacy || 0) >= 70 && !used.has(f.friendCharacterId));
+    return eligible?.friendCharacterId || null;
+}
+
+function maybeTriggerSchoolVisit() {
+    if (!playerStats || playerStats.level !== 2) return false;
+    if (!isWeekdaySchoolHours()) return false;
+    const today = toDateKey(new Date());
+    if (playerStats.schoolLastDate === today) return false;
+    setForcedAway('school', 'SCHOOL');
+    return true;
+}
+
+function maybeTriggerToiletVisit() {
+    if (!playerStats || (playerStats.feedCount || 0) < 3) return false;
+    setForcedAway('toilet', 'TOILET');
+    return true;
+}
+
+function maybeTriggerCafeVisit() {
+    if (!playerStats || !playerStats.cafePending) return false;
+    setForcedAway('cafe', 'CAFE');
+    return true;
+}
+
+function maybeTriggerPark2Visit() {
+    if (!playerStats || playerStats.level < 2) return false;
+    const friendId = getEligiblePark2FriendId();
+    if (!friendId) return false;
+    setForcedAway('park2', 'PARK2', { friendCharacterId: friendId });
+    return true;
+}
+
+function maybeTriggerPoliceAfterBank() {
+    if (!playerStats?.pendingPoliceAfterBank) return false;
+    playerStats.pendingPoliceAfterBank = false;
+    setForcedAway('police', 'PAYDAY_POLICE');
+    return true;
+}
+
+function triggerPaydaySequence() {
+    if (!playerStats) return;
+    const canPayday = (playerStats.level || 0) >= 3 && (playerStats.intimacyScore || 0) >= 90;
+    if (!canPayday) return;
+    setForcedAway('bank', 'PAYDAY_BANK');
+}
+
+function resolveForcedAwayOnPeek(placeId) {
+    if (!playerStats?.forcedAwayReason) return;
+    const reason = playerStats.forcedAwayReason;
+    const meta = playerStats.forcedAwayMeta || {};
+    const today = toDateKey(new Date());
+
+    if (reason === 'PAYDAY_BANK' && placeId === 'bank') {
+        markAchievement('payday', '페이데이');
+        playerStats.pendingPoliceAfterBank = true;
+    } else if (reason === 'PAYDAY_POLICE' && placeId === 'police') {
+        markAchievement('theft', '절도');
+    } else if (reason === 'CAFE' && placeId === 'cafe') {
+        markAchievement('iced-americano', '얼죽아');
+        playerStats.cafePending = false;
+    } else if (reason === 'SCHOOL' && placeId === 'school') {
+        markAchievement('truancy', '땡떙이');
+        playerStats.schoolLastDate = today;
+    } else if (reason === 'TOILET' && placeId === 'toilet') {
+        markAchievement('no-peek', '엿보지 마세요!');
+        playerStats.feedCount = 0;
+    } else if (reason === 'PARK2' && placeId === 'park2') {
+        markAchievement('old-friend', '죽마고우');
+        const used = new Set(playerStats.park2UsedFriendIds || []);
+        if (meta.friendCharacterId) {
+            used.add(meta.friendCharacterId);
+            playerStats.park2UsedFriendIds = Array.from(used);
+        }
+    } else if (reason === 'PHARMACY' && placeId === 'pharmacy') {
+        addDiscoveredPlace('pharmacy');
+        saveUserData({ touchLocalUpdatedAt: false });
+        return;
+    }
+
+    addDiscoveredPlace(placeId);
+    clearForcedAway();
+    saveUserData({ touchLocalUpdatedAt: false });
+}
+
 function loadUserData() {
     playerStats = { ...INITIAL_STATS };
     petHistory = [];
@@ -267,6 +466,16 @@ function loadUserData() {
                 if (!Array.isArray(playerStats.discoveredPlaces)) {
                     playerStats.discoveredPlaces = [];
                 }
+                if (!Array.isArray(playerStats.park2UsedFriendIds)) {
+                    playerStats.park2UsedFriendIds = [];
+                }
+                playerStats.achievements = playerStats.achievements || {};
+                playerStats.feedCount = playerStats.feedCount || 0;
+                playerStats.visibleAccumMillis = playerStats.visibleAccumMillis || 0;
+                playerStats.visibleLastTickAt = playerStats.visibleLastTickAt || 0;
+                playerStats.sickModeActive = !!playerStats.sickModeActive;
+                playerStats.sickAnnounced = !!playerStats.sickAnnounced;
+                playerStats.sickRecovered = !!playerStats.sickRecovered;
 
                 console.log('Loaded user data. Active Pet:', playerStats.characterName, 'History count:', petHistory.length);
             }
@@ -739,6 +948,20 @@ async function getFriends(characterId) {
     });
 }
 
+async function refreshFriendsCache(force = false) {
+    if (!ENABLE_DB_SYNC || !playerStats || !global.authTokens) return;
+    const now = Date.now();
+    if (!force && now - friendsCacheAt < 5 * 60 * 1000) return;
+    const characterId = await getOrSyncCharacterId();
+    if (!characterId) return;
+    try {
+        friendsCache = await getFriends(characterId);
+        friendsCacheAt = now;
+    } catch (err) {
+        // Cache refresh is best-effort.
+    }
+}
+
 async function getFriendMessages(characterId, friendCharacterId, limit = 30) {
     return apiRequest({
         method: 'GET',
@@ -876,11 +1099,33 @@ async function callLlmApi(characterId, userMessage, context, screenshotBuffer, i
     }
 }
 
+function handleLlmActions(llmResponse) {
+    if (!llmResponse || !Array.isArray(llmResponse.actions)) return;
+    const hasPayday = llmResponse.actions.some((a) => (a?.type || '').toUpperCase() === 'PAYDAY');
+    if (hasPayday) {
+        triggerPaydaySequence();
+    }
+}
+
+function resolveEmotionOverride(defaultEmotion = 'happy') {
+    if (playerStats?.sickModeActive) return 'sad';
+    const reason = playerStats?.forcedAwayReason;
+    if (reason === 'SCHOOL') return 'boring';
+    if (reason === 'PAYDAY_POLICE') return 'sad';
+    return defaultEmotion;
+}
+
 ipcMain.handle('llm-chat', async (event, { message } = {}) => {
     try {
         const characterId = await getOrSyncCharacterId();
         if (!characterId) {
             return { success: false, message: '캐릭터 동기화가 아직 안 됐어.' };
+        }
+        if (playerStats?.sickModeActive && !playerStats?.sickRecovered) {
+            if (characterWindow && !characterWindow.isDestroyed()) {
+                characterWindow.webContents.send('show-speech', '쿨럭쿨럭');
+            }
+            return { success: true, data: { message: '쿨럭쿨럭' } };
         }
         const text = (message || '').trim();
         if (!text) {
@@ -889,14 +1134,18 @@ ipcMain.handle('llm-chat', async (event, { message } = {}) => {
 
         const res = await callLlmApi(characterId, text, '', null);
         if (res?.message) {
+            handleLlmActions(res);
             if (characterWindow && !characterWindow.isDestroyed()) {
                 characterWindow.webContents.send('show-speech', res.message);
+                const emotion = resolveEmotionOverride(res.emotion || 'happy');
+                characterWindow.webContents.send('set-emotion', emotion);
             }
             if (typeof res.intimacyScore === 'number') {
                 playerStats.intimacyScore = res.intimacyScore;
                 // Server is source of truth for intimacy.
                 saveUserData({ touchLocalUpdatedAt: false });
             }
+            playerStats.sickRecovered = false;
             return { success: true, data: res };
         }
         return { success: false, message: '응답을 받지 못했어.' };
@@ -1670,6 +1919,7 @@ ipcMain.on('google-login', async () => {
         await syncFullStateFromDB();
         recomputeSleepMode(new Date());
         await syncStageFloorFromServerOnLogin();
+        refreshFriendsCache(true);
         if (loginWindow) loginWindow.close();
         createMainWindow();
         createTray();
@@ -1730,9 +1980,15 @@ ipcMain.handle('start-peek', () => {
     let place;
     if (playerStats.level === 0) {
         place = getPlaceById('cradle');
+    } else if (playerStats.sickModeActive) {
+        ensureSickForcedAway();
+        place = getPlaceById('pharmacy');
     } else if (playerStats.sleepModeActive) {
         const assignedHouseId = ensureAssignedHouseId();
         place = getPlaceById(assignedHouseId || 'house1');
+    } else if (playerStats.forcedAwayPlaceId) {
+        place = getPlaceById(playerStats.forcedAwayPlaceId);
+        resolveForcedAwayOnPeek(place.id);
     } else if (playerStats.awayModeActive) {
         place = pickAwayPlace();
         playerStats.awayModeActive = false;
@@ -1742,9 +1998,7 @@ ipcMain.handle('start-peek', () => {
         place = getPlaceById(assignedHouseId || 'house1');
     }
 
-    const discovered = new Set(playerStats.discoveredPlaces || []);
-    discovered.add(place.id);
-    playerStats.discoveredPlaces = Array.from(discovered);
+    addDiscoveredPlace(place.id);
     saveUserData();
     const discoveredPlaces = playerStats.discoveredPlaces.map((id) => getPlaceById(id));
     // Peek always starts with the erase overlay.
@@ -1800,6 +2054,7 @@ ipcMain.on('toggle-character', () => {
         }
     } else {
         recomputeSleepMode(new Date());
+        refreshFriendsCache();
         if (playerStats.sleepModeActive) {
             playerStats.awayModeActive = false;
             saveUserData();
@@ -1808,6 +2063,17 @@ ipcMain.on('toggle-character', () => {
             }
             return;
         }
+        if (playerStats.forcedAwayPlaceId) {
+            if (homeWindow) {
+                homeWindow.webContents.send('home-speech', '...');
+            }
+            return;
+        }
+        if (maybeTriggerPoliceAfterBank()) return;
+        if (maybeTriggerCafeVisit()) return;
+        if (maybeTriggerSchoolVisit()) return;
+        if (maybeTriggerToiletVisit()) return;
+        if (maybeTriggerPark2Visit()) return;
         if (playerStats.awayModeActive) {
             playerStats.awayModeActive = false;
             saveUserData();
@@ -1848,6 +2114,30 @@ ipcMain.handle('wake-up-from-sleep', async () => {
         }, 400);
 
         syncCharacterToDB();
+        return { success: true };
+    } catch (err) {
+        return { success: false, message: err.message };
+    }
+});
+
+ipcMain.handle('pharmacy-take-medicine', async () => {
+    try {
+        if (!playerStats?.sickModeActive) {
+            return { success: false, message: '지금은 약이 필요 없어.' };
+        }
+        playerStats.sickModeActive = false;
+        playerStats.sickRecovered = true;
+        playerStats.sickAnnounced = false;
+        playerStats.visibleAccumMillis = 0;
+        playerStats.visibleLastTickAt = Date.now();
+        clearForcedAway();
+        markAchievement('medicine', '병주고 약주고');
+        saveUserData({ touchLocalUpdatedAt: false });
+
+        if (characterWindow && !characterWindow.isDestroyed()) {
+            characterWindow.webContents.send('set-emotion', 'happy');
+            characterWindow.webContents.send('show-speech', '고마워 기운 나는거 같아!');
+        }
         return { success: true };
     } catch (err) {
         return { success: false, message: err.message };
@@ -2139,6 +2429,23 @@ setInterval(() => {
 
     const now = Date.now();
     const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+    const FIVE_HOURS = 5 * 60 * 60 * 1000;
+
+    // Track how long the character has been kept outside continuously.
+    const lastTick = playerStats.visibleLastTickAt || now;
+    const delta = Math.max(0, now - lastTick);
+    playerStats.visibleLastTickAt = now;
+    if (isCharacterVisibleOut()) {
+        playerStats.visibleAccumMillis = (playerStats.visibleAccumMillis || 0) + delta;
+    } else {
+        playerStats.visibleAccumMillis = 0;
+    }
+    if (!playerStats.sickModeActive && playerStats.visibleAccumMillis >= FIVE_HOURS) {
+        triggerSickMode();
+    }
+    if (playerStats.sickModeActive) {
+        ensureSickForcedAway();
+    }
 
     // 1. Happiness Decay (Passive)
     if (playerStats.happiness > 0) {
@@ -2233,6 +2540,13 @@ setInterval(() => {
     saveUserData();
 }, 60000); // Check every 1 minute
 
+// Refresh friends cache periodically for park2 triggers.
+setInterval(() => {
+    if (isGameRunning) {
+        refreshFriendsCache();
+    }
+}, 5 * 60 * 1000);
+
 // LLM speech bubble timer (every 2 minutes)
 setInterval(async () => {
     // Debug Log
@@ -2240,6 +2554,9 @@ setInterval(async () => {
 
     // Call LLM every 2 minutes
     if (playerStats && isGameRunning) {
+        if (playerStats.sickModeActive && !playerStats.sickRecovered) {
+            return;
+        }
 
         // If not linked to DB yet, try syncing first
         if (!playerStats.dbCharacterId) {
@@ -2281,8 +2598,11 @@ setInterval(async () => {
                 const llmResponse = await callLlmApi(playerStats.dbCharacterId, userPrompt, context, screenshotBuffer);
 
                 if (llmResponse && llmResponse.message) {
+                    handleLlmActions(llmResponse);
                     if (characterWindow && !characterWindow.isDestroyed()) {
+                        const emotion = resolveEmotionOverride(llmResponse.emotion || 'happy');
                         characterWindow.webContents.send('show-speech', llmResponse.message);
+                        characterWindow.webContents.send('set-emotion', emotion);
                     }
                     if (typeof llmResponse.intimacyScore === 'number') {
                         playerStats.intimacyScore = llmResponse.intimacyScore;
@@ -2396,6 +2716,8 @@ ipcMain.handle('friend-get-friends', async () => {
         const bootstrap = await getBootstrapSafe();
         const me = bootstrap?.characters?.find((c) => c.id === characterId) || null;
         const data = Array.isArray(me?.friends) ? me.friends : await getFriends(characterId);
+        friendsCache = Array.isArray(data) ? data : [];
+        friendsCacheAt = Date.now();
 
         // Intimacy milestone: 100 => lover, and then child once.
         const lover = data.find((f) => (f.intimacy || 0) >= 100);
@@ -2478,7 +2800,21 @@ ipcMain.handle('friend-get-messages', async (event, { friendCharacterId, limit =
 ipcMain.handle('progress-get-achievements', async () => {
     try {
         const bootstrap = await getBootstrapSafe();
-        const achievements = bootstrap?.achievements || [];
+        const achievements = Array.isArray(bootstrap?.achievements) ? bootstrap.achievements : [];
+        const byId = new Map(achievements.map((a) => [a.achievementId, a]));
+        const local = playerStats?.achievements || {};
+        Object.entries(local).forEach(([achievementId, info]) => {
+            if (byId.has(achievementId)) return;
+            achievements.push({
+                achievementId,
+                name: info.label || achievementId,
+                description: info.label || achievementId,
+                category: 'local',
+                points: 0,
+                hidden: false,
+                unlockedAt: info.achievedAt ? new Date(info.achievedAt).toISOString() : null
+            });
+        });
         return { success: true, data: achievements };
     } catch (err) {
         return { success: false, message: err.response?.data?.message || err.message };
@@ -2492,8 +2828,13 @@ ipcMain.handle('progress-get-places', async () => {
             return { success: true, data: [{ ...cradle, unlocked: true }] };
         }
         const assignedHouseId = ensureAssignedHouseId();
-        const assignedHouse = getPlaceById(assignedHouseId || 'house1');
-        return { success: true, data: [{ ...assignedHouse, unlocked: true }] };
+        const discoveredIds = new Set(playerStats.discoveredPlaces || []);
+        if (assignedHouseId) discoveredIds.add(assignedHouseId);
+        const places = Array.from(discoveredIds)
+            .map((id) => getPlaceById(id))
+            .filter((p) => p && p.id !== 'cradle')
+            .map((p) => ({ ...p, unlocked: true }));
+        return { success: true, data: places };
     } catch (err) {
         return { success: false, message: err.response?.data?.message || err.message };
     }
@@ -2562,6 +2903,9 @@ ipcMain.handle('get-player-status', () => {
 
 ipcMain.handle('start-play-mode', (event, mode) => {
     const now = Date.now();
+    if (playerStats?.sickModeActive && !playerStats?.sickRecovered) {
+        return { success: false, message: '쿨럭쿨럭... 지금은 힘들어.' };
+    }
     if (now - playerStats.lastPlayTime < PLAY_COOLDOWN) {
         return { success: false, message: '아직 놀아줄 수 없습니다. (쿨타임 중)' };
     }
@@ -2584,6 +2928,10 @@ ipcMain.handle('finish-play-mode', (event, mode) => {
     if (mode === 'food') {
         playerStats.lastFedTime = Date.now();
         playerStats.lastHungerDamageTime = Date.now();
+        playerStats.feedCount = (playerStats.feedCount || 0) + 1;
+        if (playerStats.level >= 2 && Math.random() < 0.1) {
+            playerStats.cafePending = true;
+        }
         // Optional: Recover some HP when fed?
         // playerStats.hp = Math.min(100, (playerStats.hp || 0) + 5);
         console.log('[Status] Fed characters. Hunger timer reset.');

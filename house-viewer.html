@@ -195,6 +195,54 @@
             right: 0;
             transform: translateX(var(--curtain-shift));
         }
+
+        #pharmacy-overlay {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 120;
+            pointer-events: none;
+        }
+
+        #pharmacy-overlay.visible {
+            display: flex;
+        }
+
+        .pharmacy-pill {
+            pointer-events: auto;
+            width: 120px;
+            height: 120px;
+            border-radius: 28px;
+            border: 4px solid #111;
+            background: radial-gradient(circle at 30% 30%, #ffffff 0%, #ffe8e8 45%, #ffb4b4 100%);
+            box-shadow: 6px 6px 0 #111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 56px;
+            cursor: pointer;
+            user-select: none;
+            transition: transform 120ms ease, opacity 220ms ease;
+        }
+
+        .pharmacy-pill:active {
+            transform: scale(0.96);
+        }
+
+        .pharmacy-pill.shake {
+            animation: pill-shake 420ms ease;
+        }
+
+        @keyframes pill-shake {
+            0% { transform: translateX(0); }
+            20% { transform: translateX(-6px) rotate(-4deg); }
+            40% { transform: translateX(6px) rotate(4deg); }
+            60% { transform: translateX(-4px) rotate(-2deg); }
+            80% { transform: translateX(4px) rotate(2deg); }
+            100% { transform: translateX(0); }
+        }
     </style>
 </head>
 
@@ -225,6 +273,10 @@
     </div>
     <div class="hint">드래그: 회전 · 휠: 줌</div>
 
+    <div id="pharmacy-overlay">
+        <div class="pharmacy-pill" id="pharmacy-pill" title="약 먹이기">💊</div>
+    </div>
+
     <div class="door-overlay" id="door-overlay" aria-hidden="true">
         <canvas id="door-canvas"></canvas>
     </div>
@@ -242,11 +294,18 @@
         const params = new URLSearchParams(window.location.search);
         const capturedScreenUrl = params.get('screen') || '';
         const isNewPlace = params.get('isNew') === '1';
+        const placeId = params.get('placeId') || 'house1';
         const placeBedBtn = document.getElementById('place-bed');
         const placeDeskBtn = document.getElementById('place-desk');
         const placeFloorBtn = document.getElementById('place-floor');
         const timeRange = document.getElementById('time-range');
         const timeVal = document.getElementById('time-val');
+        const pharmacyOverlay = document.getElementById('pharmacy-overlay');
+        const pharmacyPill = document.getElementById('pharmacy-pill');
+
+        if (placeId === 'pharmacy') {
+            pharmacyOverlay.classList.add('visible');
+        }
 
         function closeViewer() {
             ipcRenderer.send('close-house-viewer');
@@ -284,6 +343,17 @@
             if (typeof window.__setDebugHour === 'function') {
                 window.__setDebugHour(null);
             }
+        });
+
+        pharmacyPill.addEventListener('click', async () => {
+            if (placeId !== 'pharmacy') return;
+            pharmacyPill.classList.add('shake');
+            const res = await ipcRenderer.invoke('pharmacy-take-medicine');
+            if (res && res.success) {
+                pharmacyPill.style.opacity = '0';
+                setTimeout(() => closeViewer(), 450);
+            }
+            setTimeout(() => pharmacyPill.classList.remove('shake'), 450);
         });
 
         function showHouse() {

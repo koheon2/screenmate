@@ -109,6 +109,11 @@ ipcRenderer.on('update-image', (event, imagePath) => {
     character.src = imagePath;
 });
 
+ipcRenderer.on('set-emotion', (event, emotion) => {
+    if (!emotion) return;
+    document.body.dataset.emotion = String(emotion).toLowerCase();
+});
+
 // Request initial image
 ipcRenderer.invoke('get-current-image').then(imagePath => {
     if (imagePath) character.src = imagePath;

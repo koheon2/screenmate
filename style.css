@@ -37,6 +37,14 @@ body {
     transition: transform 0.5s ease;
 }
 
+body[data-emotion="sad"] #character {
+    filter: grayscale(0.6) saturate(0.8) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.1));
+}
+
+body[data-emotion="boring"] #character {
+    filter: saturate(0.7) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.1));
+}
+
 #animation-wrapper {
     width: 120px;
     height: 120px;
