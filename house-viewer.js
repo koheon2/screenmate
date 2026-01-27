@@ -128,7 +128,6 @@ const GROUND_COLORS = {
     pharmacy: 0x24373a,
     school: 0x3a3526,
     police: 0x1f2b3c,
-    gym: 0x2b2b2b,
     toilet: 0x2a3136,
     cradle: 0x3a2f2a,
 };

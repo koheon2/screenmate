@@ -100,7 +100,6 @@ const PLACES = [
     { id: 'bank', name: '은행', icon: '🏦', model: 'bank.glb' },
     { id: 'school', name: '학교', icon: '🏫', model: 'school.glb' },
     { id: 'police', name: '경찰서', icon: '🚓', model: 'police_station.glb' },
-    { id: 'gym', name: '헬스장', icon: '🏋️', model: 'gym.glb' },
     { id: 'toilet', name: '화장실', icon: '🚽', model: 'toilet.glb' },
     { id: 'cradle', name: '요람', icon: '🛏️', model: 'cradle.glb' },
 ];
