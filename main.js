@@ -23,6 +23,13 @@ let petHistory = []; // Archive for dead pets
 const PLAY_COOLDOWN = 0;
 const userDataPath = path.join(app.getPath('userData'), 'user-data.json');
 
+const PLACES = [
+    { id: 'home', name: '집', icon: '🏠', model: 'house.glb' },
+    { id: 'desk', name: '작업실', icon: '🪑', model: 'desk.glb' },
+    { id: 'park', name: '공원', icon: '🌿', model: 'park.glb' },
+    { id: 'cafe', name: '카페', icon: '☕', model: 'cafe.glb' },
+];
+
 const INITIAL_STATS = {
     happiness: 50,
     lastPlayTime: 0,
@@ -35,8 +42,18 @@ const INITIAL_STATS = {
     hp: 100,
     lastFedTime: Date.now(),
     lastHungerDamageTime: Date.now(),
-    birthday: Date.now()
+    birthday: Date.now(),
+    discoveredPlaces: []
 };
+
+function getPlaceById(id) {
+    return PLACES.find((p) => p.id === id) || PLACES[0];
+}
+
+function pickRandomPlace() {
+    const idx = Math.floor(Math.random() * PLACES.length);
+    return PLACES[idx];
+}
 
 function loadUserData() {
     playerStats = { ...INITIAL_STATS };
@@ -58,6 +75,9 @@ function loadUserData() {
                 // Ensure birthday exists for migration
                 if (!playerStats.birthday) {
                     playerStats.birthday = playerStats.lastEvolutionTime || Date.now();
+                }
+                if (!Array.isArray(playerStats.discoveredPlaces)) {
+                    playerStats.discoveredPlaces = [];
                 }
 
                 console.log('Loaded user data. Active Pet:', playerStats.characterName, 'History count:', petHistory.length);
@@ -238,7 +258,7 @@ async function capturePrimaryScreenDataUrl() {
     }
 }
 
-async function createHouseWindow() {
+async function createHouseWindow(placeId = 'home', isNewPlace = false) {
     if (houseWindow) {
         houseWindow.show();
         return;
@@ -260,6 +280,7 @@ async function createHouseWindow() {
     const targetX = Math.round(workArea.x);
     const targetY = Math.round(workArea.y);
     const screenCaptureUrl = await capturePrimaryScreenDataUrl();
+    const place = getPlaceById(placeId);
 
     houseWindow = new BrowserWindow({
         width: startBounds.width,
@@ -286,7 +307,15 @@ async function createHouseWindow() {
         ? pathToFileURL(playerStats.characterImage).toString()
         : '';
     houseWindow.loadFile('house-viewer.html', {
-        query: { mode: 'overlay', img: imgUrl, screen: screenCaptureUrl }
+        query: {
+            mode: 'overlay',
+            img: imgUrl,
+            screen: screenCaptureUrl,
+            placeId: place.id,
+            placeName: place.name,
+            model: place.model,
+            isNew: isNewPlace ? '1' : '0'
+        }
     });
     houseWindow.on('closed', () => houseWindow = null);
 
@@ -556,7 +585,18 @@ ipcMain.on('show-main-window', () => {
     }
 });
 
-ipcMain.on('open-house-viewer', () => {
+ipcMain.handle('start-peek', () => {
+    const place = pickRandomPlace();
+    const discovered = new Set(playerStats.discoveredPlaces || []);
+    const isNew = !discovered.has(place.id);
+    discovered.add(place.id);
+    playerStats.discoveredPlaces = Array.from(discovered);
+    saveUserData();
+    const discoveredPlaces = playerStats.discoveredPlaces.map((id) => getPlaceById(id));
+    return { place, isNew, discoveredPlaces };
+});
+
+ipcMain.on('open-house-viewer', (event, payload = {}) => {
     if (houseWindow) {
         houseWindow.close();
         return;
@@ -564,7 +604,9 @@ ipcMain.on('open-house-viewer', () => {
     if (characterWindow && !characterState.isReturningHome) {
         characterState.isReturningHome = true;
     }
-    createHouseWindow();
+    const placeId = payload.placeId || 'home';
+    const isNewPlace = !!payload.isNew;
+    createHouseWindow(placeId, isNewPlace);
 });
 
 ipcMain.on('close-house-viewer', () => {
@@ -915,6 +957,8 @@ ipcMain.handle('get-player-status', () => {
         }
     }
 
+    const discoveredPlaces = (playerStats.discoveredPlaces || []).map((id) => getPlaceById(id));
+
     return {
         happiness: playerStats.happiness,
         remainingCooldown,
@@ -922,7 +966,8 @@ ipcMain.handle('get-player-status', () => {
         level: playerStats.level,
         characterName: displayName,
         evolutionProgress: playerStats.evolutionProgress || 0,
-        hp: (playerStats.hp !== undefined) ? playerStats.hp : 100
+        hp: (playerStats.hp !== undefined) ? playerStats.hp : 100,
+        discoveredPlaces
     };
 });
 

@@ -58,6 +58,26 @@
             font-size: 12px;
         }
 
+        .debug-ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            gap: 8px;
+            z-index: 15;
+        }
+
+        .debug-btn {
+            border: none;
+            padding: 8px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.9);
+            color: #111;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
         .hint {
             position: fixed;
             left: 24px;
@@ -165,6 +185,11 @@
         <canvas id="house-canvas"></canvas>
     </div>
     <div class="status" id="house-status">모델 로딩 중...</div>
+    <div class="debug-ui">
+        <button class="debug-btn" id="place-bed">침대</button>
+        <button class="debug-btn" id="place-desk">책상</button>
+        <button class="debug-btn" id="place-floor">바닥</button>
+    </div>
     <div class="ui">
         <button class="btn" id="close-btn">닫기 (Esc)</button>
     </div>
@@ -186,6 +211,9 @@
         const curtainOverlay = document.getElementById('curtain-overlay');
         const params = new URLSearchParams(window.location.search);
         const capturedScreenUrl = params.get('screen') || '';
+        const placeBedBtn = document.getElementById('place-bed');
+        const placeDeskBtn = document.getElementById('place-desk');
+        const placeFloorBtn = document.getElementById('place-floor');
 
         function closeViewer() {
             ipcRenderer.send('close-house-viewer');
@@ -195,6 +223,16 @@
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeViewer();
         });
+
+        function place(name) {
+            if (typeof window.__setPlacement === 'function') {
+                window.__setPlacement(name);
+            }
+        }
+
+        placeBedBtn.addEventListener('click', () => place('bed'));
+        placeDeskBtn.addEventListener('click', () => place('desk'));
+        placeFloorBtn.addEventListener('click', () => place('floor'));
 
         function showHouse() {
             document.body.classList.add('house-show');

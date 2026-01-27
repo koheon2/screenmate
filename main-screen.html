@@ -346,6 +346,56 @@
             text-decoration: underline;
         }
 
+        .discovered-column {
+            position: fixed;
+            right: 14px;
+            top: 90px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 60;
+            -webkit-app-region: no-drag;
+        }
+
+        .place-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 999px;
+            border: none;
+            cursor: pointer;
+            background: #111;
+            color: #fff;
+            font-size: 20px;
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.2);
+        }
+
+        .place-icon[data-place="home"] {
+            background: #222;
+        }
+
+        .place-toast {
+            position: fixed;
+            top: 22px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-8px);
+            background: #111;
+            color: #fff;
+            padding: 10px 14px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            opacity: 0;
+            transition: all 240ms ease;
+            z-index: 120;
+            -webkit-app-region: no-drag;
+            pointer-events: none;
+        }
+
+        .place-toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
     </style>
 </head>
 
@@ -353,6 +403,8 @@
     <button class="logout-btn" id="logout-btn">로그아웃</button>
     <button class="logout-btn" id="memorial-btn" style="left: 90px; background: transparent;">🪦 납골당</button>
     <button class="close-btn" id="close-btn">×</button>
+    <div class="discovered-column" id="discovered-column"></div>
+    <div class="place-toast" id="place-toast"></div>
 
     <div class="container">
 
@@ -400,7 +452,7 @@
             입양하기</button>
         <button class="start-btn" id="start-btn">Start</button>
         <button class="play-btn" id="play-btn">놀아주기 (준비중)</button>
-        <button class="play-btn" id="house-btn" style="margin-top: 10px; background: #222;">집 엿보기</button>
+        <button class="play-btn" id="house-btn" style="margin-top: 10px; background: #222;">엿보기</button>
 
         <div class="toggle-container">
             <span class="toggle-label">집중 모드</span>
@@ -423,6 +475,29 @@
 
     <script>
         const { ipcRenderer } = require('electron');
+        const discoveredColumn = document.getElementById('discovered-column');
+        const placeToast = document.getElementById('place-toast');
+
+        function showToast(message) {
+            placeToast.textContent = message;
+            placeToast.classList.add('show');
+            setTimeout(() => placeToast.classList.remove('show'), 1800);
+        }
+
+        function renderDiscoveredPlaces(places = []) {
+            discoveredColumn.innerHTML = '';
+            places.forEach((place) => {
+                const btn = document.createElement('button');
+                btn.className = 'place-icon';
+                btn.dataset.place = place.id;
+                btn.title = place.name;
+                btn.textContent = place.icon || '●';
+                btn.addEventListener('click', () => {
+                    ipcRenderer.send('open-house-viewer', { placeId: place.id, isNew: false });
+                });
+                discoveredColumn.appendChild(btn);
+            });
+        }
 
         // Functions defined globally
         window.selectPlayMode = function (mode) {
@@ -504,6 +579,8 @@
                     playBtn.disabled = false;
                     playBtn.textContent = '놀아주기 🎮';
                 }
+
+                renderDiscoveredPlaces(stats.discoveredPlaces || []);
             });
         }
 
@@ -546,7 +623,17 @@
         });
 
         document.getElementById('house-btn').addEventListener('click', () => {
-            ipcRenderer.send('open-house-viewer');
+            ipcRenderer.invoke('start-peek').then((res) => {
+                if (!res || !res.place) return;
+                renderDiscoveredPlaces(res.discoveredPlaces || []);
+                if (res.isNew) {
+                    showToast(`새 장소 발견! ${res.place.name}`);
+                }
+                ipcRenderer.send('open-house-viewer', {
+                    placeId: res.place.id,
+                    isNew: res.isNew
+                });
+            });
         });
 
         document.getElementById('close-modal').addEventListener('click', () => {

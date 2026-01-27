@@ -9,6 +9,14 @@ const statusEl = document.getElementById('house-status');
 const params = new URLSearchParams(window.location.search);
 const isFull = params.get('mode') === 'full';
 const spriteUrl = params.get('img');
+const modelFile = params.get('model') || 'house.glb';
+const placeName = params.get('placeName') || '장소';
+const DEBUG_PLACE = true;
+const PLACEMENTS = {
+    bed: { x: -0.926, y: 0.6, z: 0.344 },
+    desk: { x: 0.539, y: 0.6, z: 0.226 },
+    floor: { x: -0.122, y: 0.3, z: 0.016 },
+};
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
@@ -53,16 +61,34 @@ scene.add(hemi);
 
 let modelRoot = null;
 let characterSprite = null;
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const placementPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.8);
+const placementPoint = new THREE.Vector3();
+let currentPlacement = 'floor';
+
+function applyPlacement(name) {
+    const target = PLACEMENTS[name];
+    if (!characterSprite || !target) return;
+    currentPlacement = name;
+    characterSprite.position.set(target.x, target.y, target.z);
+    console.log(
+        `[HousePlacement] preset=${name} x=${target.x.toFixed(3)} y=${target.y.toFixed(3)} z=${target.z.toFixed(3)}`
+    );
+}
+
+// Expose a tiny debug hook for the renderer HTML.
+window.__setPlacement = applyPlacement;
 
 const loader = new GLTFLoader();
-const modelUrl = new URL('assets/models/house.glb', window.location.href).href;
+const modelUrl = new URL(`assets/models/${modelFile}`, window.location.href).href;
 
 function setStatus(text) {
     if (!statusEl) return;
     statusEl.textContent = text;
 }
 
-setStatus('모델 로딩 중...');
+setStatus(`${placeName} 로딩 중...`);
 loader.load(
     modelUrl,
     (gltf) => {
@@ -95,7 +121,7 @@ loader.load(
         controls.target.set(0, 0.8, 0);
         controls.update();
 
-        setStatus('');
+        setStatus(placeName);
     },
     (event) => {
         if (event.total) {
@@ -105,7 +131,7 @@ loader.load(
     },
     (err) => {
         console.error('GLB load error:', err);
-        setStatus('모델을 불러오지 못했어요.');
+        setStatus(`${placeName} 모델을 불러오지 못했어요.`);
     }
 );
 
@@ -117,8 +143,8 @@ if (spriteUrl) {
             texture.colorSpace = THREE.SRGBColorSpace;
             const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
             characterSprite = new THREE.Sprite(material);
-            characterSprite.scale.set(1.1, 1.1, 1);
-            characterSprite.position.set(0.4, 1.0, 1.2);
+            characterSprite.scale.set(0.44, 0.44, 1);
+            applyPlacement(currentPlacement);
             scene.add(characterSprite);
         },
         undefined,
@@ -127,6 +153,22 @@ if (spriteUrl) {
         }
     );
 }
+
+function handleDebugPlacement(event) {
+    if (!DEBUG_PLACE || !characterSprite || !event.shiftKey) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    if (raycaster.ray.intersectPlane(placementPlane, placementPoint)) {
+        characterSprite.position.set(placementPoint.x, characterSprite.position.y, placementPoint.z);
+        console.log(
+            `[HousePlacement] x=${placementPoint.x.toFixed(3)} y=${characterSprite.position.y.toFixed(3)} z=${placementPoint.z.toFixed(3)}`
+        );
+    }
+}
+
+renderer.domElement.addEventListener('pointerdown', handleDebugPlacement);
 
 function resize() {
     const width = container.clientWidth;
