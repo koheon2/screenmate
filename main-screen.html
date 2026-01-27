@@ -399,6 +399,7 @@
             입양하기</button>
         <button class="start-btn" id="start-btn">Start</button>
         <button class="play-btn" id="play-btn">놀아주기 (준비중)</button>
+        <button class="play-btn" id="house-btn" style="margin-top: 10px; background: #222;">집 엿보기</button>
 
         <div class="toggle-container">
             <span class="toggle-label">집중 모드</span>
@@ -541,6 +542,10 @@
 
         document.getElementById('play-btn').addEventListener('click', () => {
             document.getElementById('play-modal').style.display = 'flex';
+        });
+
+        document.getElementById('house-btn').addEventListener('click', () => {
+            ipcRenderer.send('open-house-viewer');
         });
 
         document.getElementById('close-modal').addEventListener('click', () => {

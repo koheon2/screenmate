@@ -1,5 +1,6 @@
 const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { exec } = require('child_process');
 
@@ -7,6 +8,7 @@ const { exec } = require('child_process');
 let loginWindow = null;
 let mainWindow = null;
 let homeWindow = null;
+let houseWindow = null;
 let characterWindow = null;
 let playWindow = null;
 let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false };
@@ -183,6 +185,7 @@ function createHomeWindow() {
         frame: false,
         transparent: true,
         alwaysOnTop: true,
+        visibleOnAllWorkspaces: true,
         skipTaskbar: true,
         webPreferences: {
             nodeIntegration: true,
@@ -190,8 +193,74 @@ function createHomeWindow() {
         }
     });
 
+    if (process.platform === 'darwin') {
+        homeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        homeWindow.setAlwaysOnTop(true, 'screen-saver');
+    }
+
     homeWindow.loadFile('home.html');
     homeWindow.on('closed', () => homeWindow = null);
+}
+
+// ==================== HOUSE VIEWER WINDOW ====================
+function createHouseWindow() {
+    if (houseWindow) {
+        houseWindow.show();
+        return;
+    }
+
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.workAreaSize;
+    const { width: fullWidth, height: fullHeight } = primaryDisplay.bounds;
+
+    let startBounds = { width: 140, height: 140, x: 20, y: height - 160 };
+    if (homeWindow) {
+        try {
+            startBounds = homeWindow.getBounds();
+        } catch (e) { }
+    }
+
+    const targetWidth = Math.round(fullWidth);
+    const targetHeight = Math.round(fullHeight);
+    const targetX = 0;
+    const targetY = 0;
+
+    houseWindow = new BrowserWindow({
+        width: startBounds.width,
+        height: startBounds.height,
+        x: startBounds.x,
+        y: startBounds.y,
+        show: true,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        backgroundColor: '#00000000',
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+        }
+    });
+
+    if (process.platform === 'darwin') {
+        houseWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        houseWindow.setAlwaysOnTop(true, 'screen-saver');
+    }
+
+    const imgUrl = playerStats && playerStats.characterImage
+        ? pathToFileURL(playerStats.characterImage).toString()
+        : '';
+    houseWindow.loadFile('house-viewer.html', { query: { mode: 'overlay', img: imgUrl } });
+    houseWindow.on('closed', () => houseWindow = null);
+
+    // Jump to a larger overlay (no animation)
+    setTimeout(() => {
+        if (houseWindow) {
+            houseWindow.setBounds(
+                { x: targetX, y: targetY, width: targetWidth, height: targetHeight },
+                true
+            );
+        }
+    }, 30);
 }
 
 // ==================== CHARACTER WINDOW ====================
@@ -423,6 +492,7 @@ ipcMain.on('logout', () => {
     if (mainWindow) mainWindow.close();
     if (characterWindow) characterWindow.close();
     if (homeWindow) homeWindow.close();
+    if (houseWindow) houseWindow.close();
     if (tray) tray.destroy();
     if (playWindow) playWindow.close();
     createLoginWindow();
@@ -447,6 +517,21 @@ ipcMain.on('show-main-window', () => {
             });
         }
     }
+});
+
+ipcMain.on('open-house-viewer', () => {
+    if (houseWindow) {
+        houseWindow.close();
+        return;
+    }
+    if (characterWindow && !characterState.isReturningHome) {
+        characterState.isReturningHome = true;
+    }
+    createHouseWindow();
+});
+
+ipcMain.on('close-house-viewer', () => {
+    if (houseWindow) houseWindow.close();
 });
 
 ipcMain.on('toggle-focus-mode', (event, isFocusOn) => {

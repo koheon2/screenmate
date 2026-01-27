@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>House Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+            font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        }
+
+        #house-container {
+            position: fixed;
+            inset: 0;
+            background: transparent;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(circle at 50% 35%,
+                    rgba(255, 255, 255, 0.08) 0%,
+                    rgba(255, 255, 255, 0.03) 35%,
+                    rgba(0, 0, 0, 0.25) 75%,
+                    rgba(0, 0, 0, 0.45) 100%);
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        #house-canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        .ui {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .btn {
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            font-size: 12px;
+        }
+
+        .hint {
+            position: fixed;
+            left: 24px;
+            bottom: 24px;
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            font-size: 12px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            z-index: 10;
+        }
+
+        .status {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 8px;
+            z-index: 10;
+        }
+    </style>
+</head>
+
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <div id="house-container">
+        <canvas id="house-canvas"></canvas>
+    </div>
+    <div class="status" id="house-status">모델 로딩 중...</div>
+    <div class="ui">
+        <button class="btn" id="close-btn">닫기 (Esc)</button>
+    </div>
+    <div class="hint">드래그: 회전 · 휠: 줌</div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        const closeBtn = document.getElementById('close-btn');
+
+        function closeViewer() {
+            ipcRenderer.send('close-house-viewer');
+        }
+
+        closeBtn.addEventListener('click', closeViewer);
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeViewer();
+        });
+    </script>
+    <script type="module" src="house-viewer.js"></script>
+</body>
+
+</html>
