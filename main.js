@@ -58,6 +58,7 @@ let homeWindow = null;
 let houseWindow = null;
 let characterWindow = null;
 let playWindow = null;
+let petGameWindow = null;
 let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false, isSleeping: false };
 let tray = null;
 
@@ -2027,6 +2028,72 @@ app.whenReady().then(async () => {
     } else {
         // Show login window
         createLoginWindow();
+    }
+});
+
+// ==================== PETTING GAME ====================
+
+function createPetGameWindow() {
+    if (petGameWindow) {
+        petGameWindow.focus();
+        return;
+    }
+
+    petGameWindow = new BrowserWindow({
+        width: 1000,
+        height: 700,
+        webPreferences: {
+            preload: path.join(__dirname, 'pet-game-preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false
+        },
+        title: '쓰다듬기',
+        backgroundColor: '#667eea',
+        show: false
+    });
+
+    petGameWindow.loadFile('pet-game.html');
+
+    petGameWindow.once('ready-to-show', () => {
+        petGameWindow.show();
+    });
+
+    petGameWindow.on('closed', () => {
+        petGameWindow = null;
+    });
+}
+
+ipcMain.on('open-pet-game', () => {
+    createPetGameWindow();
+});
+
+ipcMain.on('pet-interaction', (event, { score }) => {
+    // Just update last play time (happiness will be added at the end)
+    if (playerStats && playerStats.hp > 0) {
+        playerStats.lastPlayTime = Date.now();
+    }
+});
+
+ipcMain.on('pet-game-close', (event, { finalScore }) => {
+    console.log(`[Pet Game] Closed with final score: ${finalScore}`);
+
+    // Give happiness based on final score (1:1 ratio)
+    if (playerStats && playerStats.hp > 0 && finalScore > 0) {
+        const bonus = finalScore; // 1 score = 1 happiness
+        playerStats.happiness = Math.min(100, playerStats.happiness + bonus);
+        playerStats.lastPlayTime = Date.now();
+
+        console.log(`[Pet Game] Happiness bonus: +${bonus}`);
+
+        // Send update to main window
+        if (mainWindow) {
+            mainWindow.webContents.send('stats-update', {
+                happiness: playerStats.happiness,
+                hp: playerStats.hp
+            });
+        }
+
+        saveUserData();
     }
 });
 

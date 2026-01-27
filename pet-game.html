@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>쓰다듬기</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #video-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 240px;
+            height: 180px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 10;
+            background: #000;
+        }
+
+        #webcam {
+            display: none;
+        }
+
+        #hand-canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        #character {
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            object-fit: contain;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        #hand-emoji {
+            position: absolute;
+            font-size: 80px;
+            z-index: 15;
+            pointer-events: none;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+            will-change: transform;
+            top: 0;
+            left: 0;
+        }
+
+        .heart {
+            position: absolute;
+            font-size: 40px;
+            z-index: 20;
+            pointer-events: none;
+            animation: float-up 2s ease-out forwards;
+        }
+
+        @keyframes float-up {
+            0% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateY(-200px) scale(1.5);
+            }
+        }
+
+        #score-display {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 10;
+        }
+
+        #score-display h2 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        #score {
+            font-size: 32px;
+            font-weight: 900;
+            color: #667eea;
+        }
+
+        #close-btn {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 32px;
+            background: rgba(255, 255, 255, 0.95);
+            border: none;
+            border-radius: 24px;
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 10;
+            transition: transform 0.2s;
+        }
+
+        #close-btn:hover {
+            transform: translateX(-50%) scale(1.05);
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 20px;
+            font-weight: 700;
+            text-align: center;
+            z-index: 100;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="game-container">
+        <div id="loading">손 인식 모델 로딩 중...</div>
+
+        <div id="video-container">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="hand-canvas" width="240" height="180"></canvas>
+        </div>
+
+        <img id="character" src="" alt="Character">
+        <div id="hand-emoji">✋</div>
+
+        <div id="score-display">
+            <h2>쓰다듬기 점수</h2>
+            <div id="score">0</div>
+            <div style="margin-top: 8px; font-size: 14px; color: #666;">남은 시간: <span id="timer">10</span>초</div>
+        </div>
+
+        <button id="close-btn">닫기</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="pet-game.js"></script>
+</body>
+
+</html>
