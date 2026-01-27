@@ -100,6 +100,7 @@ const INITIAL_STATS = {
     hp: 100,
     lastFedTime: Date.now(),
     lastHungerDamageTime: Date.now(),
+    lastAgingTime: Date.now(),
     birthday: Date.now(),
     discoveredPlaces: []
 };
@@ -1379,65 +1380,77 @@ function updateDynamicImage() {
 }
 
 // Check evolution progress and decrease happiness periodically
+// ==================== STATUS & HP MANAGEMENT (Every 1 Minute) ====================
 setInterval(() => {
-    // 0. Ensure Home Window always exists if game is running
-
     if (!playerStats) return;
 
+    // 0. Watchdog: Ensure Home icon exists
     if (isGameRunning && !homeWindow) {
         console.log('[Watchdog] Home icon missing. Recreating...');
         createHomeWindow();
     }
 
-    // 1. Decrease Happiness (Decay)
+    const now = Date.now();
+    const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+
+    // 1. Happiness Decay (Passive)
     if (playerStats.happiness > 0) {
         playerStats.happiness = Math.max(0, playerStats.happiness - 1);
         console.log(`[Status] Happiness decayed to: ${playerStats.happiness}`);
     }
 
-    // Hunger Check (Recursive every 8 hours)
-    // 8 hours = 28800000 ms
-    const EIGHT_HOURS = 8 * 60 * 60 * 1000;
-    const now = Date.now();
-
-    // Check if we need to apply damage (based on last damage time)
-    // Initialize lastHungerDamageTime if missing using lastFedTime
-    if (!playerStats.lastHungerDamageTime) playerStats.lastHungerDamageTime = playerStats.lastFedTime || now;
-
-    if (now - playerStats.lastHungerDamageTime >= EIGHT_HOURS) {
-        playerStats.hp = Math.max(0, playerStats.hp - 30);
-        playerStats.lastHungerDamageTime = now; // Reset damage timer
-        console.log(`[Status] HP penalty (-30) due to hunger!`);
-    }
-
-    // For recovery, we check actual last Fed Time
-    const timeSinceFed = now - (playerStats.lastFedTime || now);
-    const isStarving = timeSinceFed >= EIGHT_HOURS;
-
-    // HP Logic (Decay or Recover)
+    // 2. HP Management
     if (playerStats.hp === undefined) playerStats.hp = 100;
 
-    if (playerStats.happiness < 50) {
-        // Decay due to sadness (approx 10 per hour => 10/60 chance per minute)
-        if (playerStats.hp > 0 && Math.random() < 0.17) {
-            playerStats.hp = Math.max(0, playerStats.hp - 1);
-            console.log(`[Status] HP decayed due to sadness: ${playerStats.hp}`);
-        }
-    } else if (!isStarving) {
-        // Recover if Happy (>=50) and Not Starving
-        if (playerStats.hp < 100) {
-            playerStats.hp = Math.min(100, playerStats.hp + 1);
-            // console.log(`[Status] HP recovered: ${playerStats.hp}`);
+    // A. Hunger Damage (Check every 12 hours)
+    if (!playerStats.lastHungerDamageTime) playerStats.lastHungerDamageTime = playerStats.lastFedTime || now;
+    const timeSinceFed = now - (playerStats.lastFedTime || now);
+    const isStarving = timeSinceFed >= TWELVE_HOURS;
+
+    if (now - playerStats.lastHungerDamageTime >= TWELVE_HOURS) {
+        playerStats.hp = Math.max(0, playerStats.hp - 15);
+        playerStats.lastHungerDamageTime = now;
+        console.log(`[Status] HP penalty (-15) due to hunger! Current HP: ${playerStats.hp}`);
+    }
+
+    // B. Aging Damage (Lifespan Check every 24 hours)
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    if (!playerStats.lastAgingTime) playerStats.lastAgingTime = playerStats.birthday || now;
+
+    if (now - playerStats.lastAgingTime >= TWENTY_FOUR_HOURS) {
+        let agingDamage = 0;
+        if (playerStats.level === 1) agingDamage = 10; // 10 days lifespan
+        else if (playerStats.level >= 2) agingDamage = 7.5; // 15 days lifespan
+
+        if (agingDamage > 0) {
+            playerStats.hp = Math.max(0, playerStats.hp - agingDamage);
+            playerStats.lastAgingTime = now;
+            console.log(`[Status] Aging penalty (-${agingDamage}) due to lifespan! Current HP: ${playerStats.hp}`);
         }
     }
 
-    // Update Image based on new happiness
-    updateDynamicImage();
+    // C. Gradual HP Changes (Based on Happiness)
+    if (playerStats.happiness < 50) {
+        // HP slowly decays if character is sad (Approx 10 per hour)
+        if (playerStats.hp > 0 && Math.random() < 0.17) {
+            playerStats.hp = Math.max(0, playerStats.hp - 1);
+            console.log(`[Status] HP decaying due to sadness: ${playerStats.hp}`);
+        }
+    } else if (!isStarving) {
+        // HP recovers if happy and well-fed (Approx 5 per day => 5/1440 chance per minute)
+        if (playerStats.hp < 100 && Math.random() < 0.00347) {
+            playerStats.hp = Math.min(100, playerStats.hp + 1);
+            console.log(`[Status] HP recovering: ${playerStats.hp}`);
+        }
+    }
 
-    // 3. Death Check
+    // C. Death Check
     if (playerStats.hp <= 0) {
         handleDeath();
     }
+
+    // 3. Visuals and Timers
+    updateDynamicImage();
 
     // Check Sleep Time (23:00 ~ 06:00)
     // Check Sleep Time (00:00 ~ 06:00)
@@ -1457,13 +1470,17 @@ setInterval(() => {
 
     // 2. Evolution Progress (Level 1+)
     if (playerStats.level > 0 && playerStats.level < 3 && playerStats.hp > 0) {
-        // Normal speed: 1% per minute
-        // Bonus: If happy (> 60), grow faster (+2%)
-        const growthRate = (playerStats.happiness > 60) ? 2 : 1;
+        // Targets: 1->2 (5 days = 7200 mins), 2->3 (10 days = 14400 mins)
+        // Base rate per minute to reach 100%
+        let baseRate = (playerStats.level === 1) ? (100 / 7200) : (100 / 14400);
 
-        playerStats.evolutionProgress = Math.min(100, (playerStats.evolutionProgress || 0) + growthRate);
+        // Bonus: If happy (> 60), grow 2x faster
+        const multiplier = (playerStats.happiness > 60) ? 2 : 1;
+        const growth = baseRate * multiplier;
 
-        console.log(`[Evolution] Level ${playerStats.level} Progress: ${playerStats.evolutionProgress}% (+${growthRate})`);
+        playerStats.evolutionProgress = Math.min(100, (playerStats.evolutionProgress || 0) + growth);
+
+        console.log(`[Evolution] Level ${playerStats.level} Progress: ${playerStats.evolutionProgress.toFixed(4)}% (+${growth.toFixed(5)})`);
 
         if (playerStats.evolutionProgress >= 100) {
             evolveCharacter(playerStats.level + 1);
