@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>가계도</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 16px;
+            font-family: "Noto Sans KR", system-ui, -apple-system, sans-serif;
+            background: #fff9f0;
+            color: #1f1f1f;
+        }
+
+        .topbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .btn {
+            border: 2px solid #1f1f1f;
+            background: #ffd166;
+            color: #1f1f1f;
+            padding: 6px 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        .btn.secondary {
+            background: #ffffff;
+        }
+
+        .card {
+            border: 2px solid #1f1f1f;
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 12px;
+            box-shadow: 3px 3px 0 #1f1f1f;
+        }
+
+        .title {
+            font-size: 18px;
+            font-weight: 800;
+            margin-bottom: 6px;
+        }
+
+        .muted {
+            color: #555;
+            font-size: 13px;
+        }
+
+        .error {
+            color: #b00020;
+            font-weight: 700;
+        }
+
+        .tree {
+            display: grid;
+            grid-auto-flow: column;
+            grid-auto-columns: minmax(180px, 1fr);
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+
+        .gen-col {
+            border: 2px solid #1f1f1f;
+            border-radius: 10px;
+            background: #fffdf7;
+            padding: 8px;
+            min-height: 80px;
+        }
+
+        .gen-title {
+            font-weight: 800;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+
+        .node-card {
+            border: 2px solid #1f1f1f;
+            border-radius: 10px;
+            background: #ffffff;
+            padding: 6px 8px;
+            margin-bottom: 6px;
+            box-shadow: 2px 2px 0 #1f1f1f;
+            font-size: 13px;
+            line-height: 1.35;
+        }
+
+        .node-card.root {
+            background: #ffe29a;
+        }
+
+        .node-name {
+            font-weight: 800;
+            margin-bottom: 2px;
+        }
+
+        .node-meta {
+            color: #444;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="topbar">
+        <button class="btn secondary" id="back-btn">← 돌아가기</button>
+        <button class="btn" id="refresh-btn">새로고침</button>
+        <button class="btn secondary" data-depth="2">깊이 2</button>
+        <button class="btn secondary" data-depth="4">깊이 4</button>
+        <button class="btn secondary" data-depth="6">깊이 6</button>
+    </div>
+
+    <div class="card">
+        <div class="title">가계도</div>
+        <div class="muted" id="summary">불러오는 중...</div>
+    </div>
+
+    <div class="card">
+        <div class="title">가계도 트리</div>
+        <div class="muted" style="margin-bottom:8px;">왼쪽은 조상, 가운데는 나, 오른쪽은 자손</div>
+        <div id="tree"></div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        const summaryEl = document.getElementById('summary');
+        const treeEl = document.getElementById('tree');
+
+        let currentDepth = 4;
+
+        function fmtDate(value) {
+            if (!value) return '알 수 없음';
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return '알 수 없음';
+            return d.toLocaleString();
+        }
+
+        function makeNodeCard(node, isRoot) {
+            const owner = node.ownerDisplayName ? ` · ${node.ownerDisplayName}` : '';
+            const created = fmtDate(node.createdAt);
+            return `
+                <div class="node-card${isRoot ? ' root' : ''}">
+                    <div class="node-name">${node.name || node.id}</div>
+                    <div class="node-meta">${node.species || '종족 미상'} · 코드 ${node.inviteCode || '???'}${owner}</div>
+                    <div class="node-meta">생성: ${created}</div>
+                </div>
+            `;
+        }
+
+        function buildGenerations(rootId, nodes, edges, depth) {
+            const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+            if (!nodeMap.has(rootId)) {
+                const fallbackRoot = nodes[0];
+                rootId = fallbackRoot?.id || rootId;
+            }
+
+            const parentsByChild = new Map();
+            const childrenByParent = new Map();
+
+            edges.forEach((e) => {
+                const parents = [e.parentACharacterId, e.parentBCharacterId].filter(Boolean);
+                parentsByChild.set(e.childCharacterId, parents);
+                parents.forEach((pid) => {
+                    const arr = childrenByParent.get(pid) || [];
+                    arr.push(e.childCharacterId);
+                    childrenByParent.set(pid, arr);
+                });
+            });
+
+            const genMap = new Map();
+            genMap.set(rootId, 0);
+
+            let frontier = new Set([rootId]);
+            for (let g = -1; g >= -depth && frontier.size; g--) {
+                const next = new Set();
+                frontier.forEach((cid) => {
+                    (parentsByChild.get(cid) || []).forEach((pid) => {
+                        if (!genMap.has(pid)) {
+                            genMap.set(pid, g);
+                            next.add(pid);
+                        }
+                    });
+                });
+                frontier = next;
+            }
+
+            frontier = new Set([rootId]);
+            for (let g = 1; g <= depth && frontier.size; g++) {
+                const next = new Set();
+                frontier.forEach((pid) => {
+                    (childrenByParent.get(pid) || []).forEach((cid) => {
+                        if (!genMap.has(cid)) {
+                            genMap.set(cid, g);
+                            next.add(cid);
+                        }
+                    });
+                });
+                frontier = next;
+            }
+
+            const generations = new Map();
+            genMap.forEach((gen, id) => {
+                const list = generations.get(gen) || [];
+                const node = nodeMap.get(id) || { id };
+                list.push(node);
+                generations.set(gen, list);
+            });
+
+            return { generations, rootId };
+        }
+
+        function renderTree(rootId, nodes, edges, depth) {
+            treeEl.innerHTML = '';
+            if (!nodes.length) {
+                treeEl.innerHTML = '<div class="muted">가계도 데이터가 없어.</div>';
+                return;
+            }
+
+            const { generations, rootId: resolvedRootId } = buildGenerations(rootId, nodes, edges, depth);
+            const genKeys = Array.from(generations.keys()).sort((a, b) => a - b);
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'tree';
+
+            genKeys.forEach((gen) => {
+                const col = document.createElement('div');
+                col.className = 'gen-col';
+
+                const title = document.createElement('div');
+                title.className = 'gen-title';
+                if (gen === 0) title.textContent = '나';
+                else if (gen < 0) title.textContent = `${Math.abs(gen)}세대 위`;
+                else title.textContent = `${gen}세대 아래`;
+                col.appendChild(title);
+
+                const list = generations.get(gen) || [];
+                list
+                    .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
+                    .forEach((node) => {
+                        const isRoot = node.id === resolvedRootId;
+                        col.insertAdjacentHTML('beforeend', makeNodeCard(node, isRoot));
+                    });
+
+                wrapper.appendChild(col);
+            });
+
+            treeEl.appendChild(wrapper);
+        }
+
+        async function loadLineage() {
+            summaryEl.textContent = '불러오는 중...';
+            treeEl.innerHTML = '';
+
+            const res = await ipcRenderer.invoke('lineage-get-graph', { depth: currentDepth });
+            if (!res.success) {
+                summaryEl.innerHTML = `<span class="error">${res.message || '가계도를 불러오지 못했어.'}</span>`;
+                return;
+            }
+
+            const data = res.data || {};
+            const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+            const edges = Array.isArray(data.edges) ? data.edges : [];
+            const rootId = data.rootCharacterId;
+
+            summaryEl.textContent = `노드 ${nodes.length}개 · 관계 ${edges.length}개 · 깊이 ${currentDepth}`;
+            renderTree(rootId, nodes, edges, currentDepth);
+        }
+
+        document.getElementById('back-btn').addEventListener('click', () => {
+            ipcRenderer.send('go-to-main');
+        });
+        document.getElementById('refresh-btn').addEventListener('click', loadLineage);
+        document.querySelectorAll('[data-depth]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                currentDepth = Number(btn.getAttribute('data-depth')) || 4;
+                loadLineage();
+            });
+        });
+
+        loadLineage();
+    </script>
+</body>
+
+</html>

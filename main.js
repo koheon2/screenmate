@@ -161,6 +161,8 @@ const INITIAL_STATS = {
     sleepModeActive: false,
     wokeUpEarlyDate: null,
     gender: null,
+    pendingLineageParents: null,
+    lineageCreated: false,
     localUpdatedAt: 0,
     serverVersion: 0,
     serverUpdatedAt: 0
@@ -503,6 +505,35 @@ async function recordCharacterEvent(eventType, eventText, metadata) {
     return createEventInDB(characterId, eventType, eventText, metadata);
 }
 
+async function createLineageInDB(childCharacterId, parentACharacterId, parentBCharacterId) {
+    if (!childCharacterId || !parentACharacterId || !parentBCharacterId) return null;
+    try {
+        return await apiRequest({
+            method: 'POST',
+            url: `${API_BASE_URL}/characters/${childCharacterId}/lineage`,
+            data: { parentACharacterId, parentBCharacterId }
+        });
+    } catch (err) {
+        console.error('[Lineage] Failed to create lineage:', err.response?.data || err.message);
+        return null;
+    }
+}
+
+async function tryCreatePendingLineage() {
+    if (!ENABLE_DB_SYNC) return;
+    if (!playerStats?.pendingLineageParents || playerStats.lineageCreated) return;
+    const childCharacterId = playerStats.dbCharacterId;
+    if (!childCharacterId) return;
+
+    const { parentACharacterId, parentBCharacterId } = playerStats.pendingLineageParents;
+    const created = await createLineageInDB(childCharacterId, parentACharacterId, parentBCharacterId);
+    if (created) {
+        playerStats.lineageCreated = true;
+        playerStats.pendingLineageParents = null;
+        saveUserData();
+    }
+}
+
 async function getCharacterDetailFromDB(characterId) {
     if (!characterId) return null;
     try {
@@ -720,6 +751,14 @@ async function sendFriendMessage(characterId, friendCharacterId, messageText, em
     });
 }
 
+async function getLineageGraph(characterId, depth = 4) {
+    return apiRequest({
+        method: 'GET',
+        url: `${API_BASE_URL}/characters/${characterId}/lineage`,
+        params: { depth }
+    });
+}
+
 // Call LLM API (with optional screenshot)
 // Call LLM API (with optional screenshot)
 // Refresh Backend Access Token
@@ -907,6 +946,9 @@ async function syncCharacterToDB() {
         } else {
             playerStats.lastSyncedStageIndex = safeStageIndex;
         }
+
+        // If we have a pending parent pair, persist it once the child exists in DB.
+        tryCreatePendingLineage();
     }
 }
 
@@ -975,6 +1017,12 @@ function createMainWindow() {
 ipcMain.on('open-memorial', () => {
     if (mainWindow) {
         mainWindow.loadFile('memorial.html');
+    }
+});
+
+ipcMain.on('open-lineage', () => {
+    if (mainWindow) {
+        mainWindow.loadFile('lineage.html');
     }
 });
 
@@ -2260,6 +2308,11 @@ ipcMain.handle('friend-get-friends', async () => {
                 friendCharacterId: lover.friendCharacterId,
                 friendName: lover.friendName
             });
+            playerStats.pendingLineageParents = {
+                parentACharacterId: characterId,
+                parentBCharacterId: lover.friendCharacterId
+            };
+            playerStats.lineageCreated = false;
             saveUserData();
         }
 
@@ -2278,6 +2331,17 @@ ipcMain.handle('friend-get-my-character', async () => {
         const me = characters.find((c) => c.id === characterId) || null;
         if (!me) return { success: false, message: '내 캐릭터를 찾지 못했어.' };
         return { success: true, data: me };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('lineage-get-graph', async (event, { depth = 4 } = {}) => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
+        const data = await getLineageGraph(characterId, depth);
+        return { success: true, data: { ...data, rootCharacterId: characterId } };
     } catch (err) {
         return { success: false, message: err.response?.data?.message || err.message };
     }

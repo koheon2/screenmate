@@ -742,6 +742,7 @@
     <div class="drag-region"></div>
     <button class="logout-btn" id="logout-btn">로그아웃</button>
     <button class="logout-btn" id="memorial-btn" style="left: 90px; background: transparent;">🪦 납골당</button>
+    <button class="logout-btn" id="lineage-btn" style="left: 200px; background: transparent;">🌳 가계도</button>
     <button class="close-btn" id="close-btn">×</button>
     <div class="discovered-column" id="discovered-column"></div>
     <div class="place-toast" id="place-toast"></div>
@@ -1382,6 +1383,10 @@
 
         document.getElementById('memorial-btn').addEventListener('click', () => {
             ipcRenderer.send('open-memorial');
+        });
+
+        document.getElementById('lineage-btn').addEventListener('click', () => {
+            ipcRenderer.send('open-lineage');
         });
 
         document.getElementById('reset-btn').addEventListener('click', () => {
