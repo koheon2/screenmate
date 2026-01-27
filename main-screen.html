@@ -240,6 +240,13 @@
             transition: width 0.5s ease;
         }
 
+        .progress-fill-intimacy {
+            height: 100%;
+            background: linear-gradient(90deg, #ffd166 0%, #f4a261 100%);
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
         /* Play Button */
         .play-btn {
             -webkit-app-region: no-drag;
@@ -776,6 +783,16 @@
             </div>
         </div>
 
+        <div class="happiness-container">
+            <div class="happiness-label">
+                <span>친밀도</span>
+                <span id="intimacy-val">0.0/100</span>
+            </div>
+            <div class="progress-bg">
+                <div class="progress-fill-intimacy" id="intimacy-bar" style="width: 0%;"></div>
+            </div>
+        </div>
+
         <!-- HP Bar -->
         <div class="happiness-container">
             <div class="happiness-label">
@@ -1302,6 +1319,9 @@
                 // Update Happiness
                 document.getElementById('happiness-val').textContent = `${stats.happiness}/100`;
                 document.getElementById('happiness-bar').style.width = `${stats.happiness}%`;
+                const intimacy = typeof stats.intimacyScore === 'number' ? stats.intimacyScore : 0;
+                document.getElementById('intimacy-bar').style.width = `${Math.max(0, Math.min(100, intimacy))}%`;
+                document.getElementById('intimacy-val').textContent = `${intimacy.toFixed(1)}/100`;
 
                 // Update Character Image
                 if (stats.characterImage) {
@@ -1312,7 +1332,6 @@
                 if (stats.characterName) {
                     document.getElementById('character-name').textContent = `${stats.characterName} (Lv.${stats.level})`;
                 }
-                const intimacy = typeof stats.intimacyScore === 'number' ? stats.intimacyScore : 0;
                 document.getElementById('character-intimacy').textContent = `친밀도 ${intimacy.toFixed(1)}`;
 
                 // Update HP Bar
