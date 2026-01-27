@@ -1,8 +1,5 @@
-screenmate_backend/
-node_modules/
-dist/
-out/
-build/
 .env
+node_modules
+/dist
+/build
 .DS_Store
-Thumbs.db

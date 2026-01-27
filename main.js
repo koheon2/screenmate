@@ -1,4 +1,6 @@
 const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
+require('dotenv').config();
+
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
