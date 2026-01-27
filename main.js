@@ -146,7 +146,10 @@ const INITIAL_STATS = {
     assignedHouseId: null,
     awayModeActive: false,
     sleepModeActive: false,
-    wokeUpEarlyDate: null
+    wokeUpEarlyDate: null,
+    localUpdatedAt: 0,
+    serverVersion: 0,
+    serverUpdatedAt: 0
 };
 
 function getPlaceById(id) {
@@ -181,6 +184,23 @@ function recomputeSleepMode(now = new Date()) {
     return playerStats.sleepModeActive;
 }
 
+let homePlaceSyncInFlight = false;
+
+async function syncAssignedHouseIdToServer() {
+    if (!ENABLE_DB_SYNC) return;
+    if (!playerStats?.dbCharacterId) return;
+    if (homePlaceSyncInFlight) return;
+
+    homePlaceSyncInFlight = true;
+    try {
+        await updateCharacterInDB(playerStats.dbCharacterId, {
+            homePlaceId: playerStats.assignedHouseId || null
+        });
+    } finally {
+        homePlaceSyncInFlight = false;
+    }
+}
+
 function ensureAssignedHouseId() {
     if (!playerStats) return null;
     if (playerStats.level < 1) {
@@ -191,6 +211,8 @@ function ensureAssignedHouseId() {
         const idx = Math.floor(Math.random() * HOUSE_IDS.length);
         playerStats.assignedHouseId = HOUSE_IDS[idx];
         saveUserData();
+        // Fire-and-forget: persist assigned house once we have a character ID.
+        syncAssignedHouseIdToServer();
     }
     return playerStats.assignedHouseId;
 }
@@ -235,8 +257,11 @@ function loadUserData() {
     }
 }
 
-function saveUserData() {
+function saveUserData(options = {}) {
     try {
+        if (playerStats && options.touchLocalUpdatedAt !== false) {
+            playerStats.localUpdatedAt = Date.now();
+        }
         const dataToSave = {
             activePet: playerStats,
             petHistory: petHistory
@@ -413,6 +438,33 @@ async function getBootstrapSafe() {
     }
 }
 
+async function syncStageFloorFromServerOnLogin() {
+    if (!playerStats) return;
+
+    const localLevel = playerStats.level || 0;
+    let floor = localLevel;
+
+    try {
+        const bootstrap = await getBootstrapFromDB();
+        const characterId = playerStats.dbCharacterId;
+        const me = bootstrap?.characters?.find((c) => c.id === characterId) || null;
+
+        if (me) {
+            const serverStage = me.stageIndex || 0;
+            floor = Math.max(localLevel, serverStage);
+
+            if (me.homePlaceId && HOUSE_IDS.includes(me.homePlaceId)) {
+                playerStats.assignedHouseId = me.homePlaceId;
+            }
+        }
+    } catch (e) {
+        // Fall back to local data if bootstrap fails on login.
+    }
+
+    playerStats.lastSyncedStageIndex = floor;
+    saveUserData();
+}
+
 async function createEventInDB(characterId, eventType, eventText, metadata) {
     if (!characterId) return null;
     try {
@@ -465,6 +517,29 @@ async function getCharacterEventsFromDB(characterId, limit = 30) {
     }
 }
 
+function getServerUpdatedAtMillis(updatedAt) {
+    if (!updatedAt) return 0;
+    const t = new Date(updatedAt).getTime();
+    return Number.isFinite(t) ? t : 0;
+}
+
+function applyServerCharacterToLocal(me) {
+    if (!me || !playerStats) return;
+
+    if (typeof me.stageIndex === 'number') playerStats.level = me.stageIndex;
+    if (typeof me.happiness === 'number') playerStats.happiness = me.happiness;
+    if (typeof me.health === 'number') playerStats.hp = me.health;
+    if (me.lastFedAt) playerStats.lastFedTime = new Date(me.lastFedAt).getTime();
+    if (me.lastPlayedAt) playerStats.lastPlayTime = new Date(me.lastPlayedAt).getTime();
+    if (me.homePlaceId && HOUSE_IDS.includes(me.homePlaceId)) {
+        playerStats.assignedHouseId = me.homePlaceId;
+    }
+
+    playerStats.serverVersion = me.version || playerStats.serverVersion || 0;
+    playerStats.serverUpdatedAt = getServerUpdatedAtMillis(me.updatedAt);
+    playerStats.localUpdatedAt = playerStats.serverUpdatedAt;
+}
+
 async function syncFullStateFromDB() {
     try {
         if (!global.authTokens) return;
@@ -493,14 +568,22 @@ async function syncFullStateFromDB() {
             return;
         }
 
-        console.log(`[Sync] Syncing stats for ${me.name}...`);
+        console.log(`[Sync] Reconciling state for ${me.name}...`);
 
-        // Sync Stats
-        if (typeof me.stageIndex === 'number') playerStats.level = me.stageIndex;
-        if (typeof me.happiness === 'number') playerStats.happiness = me.happiness;
-        if (typeof me.health === 'number') playerStats.hp = me.health;
-        if (me.lastFedAt) playerStats.lastFedTime = new Date(me.lastFedAt).getTime();
-        if (me.lastPlayedAt) playerStats.lastPlayTime = new Date(me.lastPlayedAt).getTime();
+        const serverVersion = me.version || 0;
+        const serverUpdatedAt = getServerUpdatedAtMillis(me.updatedAt);
+        const localUpdatedAt = playerStats.localUpdatedAt || 0;
+        const localServerVersion = playerStats.serverVersion || 0;
+
+        const shouldPullFromServer = serverVersion > localServerVersion || serverUpdatedAt > localUpdatedAt;
+
+        if (shouldPullFromServer) {
+            applyServerCharacterToLocal(me);
+        } else {
+            // Keep local-first data, but carry forward server markers.
+            playerStats.serverVersion = localServerVersion || serverVersion;
+            playerStats.serverUpdatedAt = Math.max(playerStats.serverUpdatedAt || 0, serverUpdatedAt);
+        }
 
         // Restore English Name & Image Path (For new device / missing local data)
         if (!playerStats.characterName && me.name) {
@@ -525,9 +608,15 @@ async function syncFullStateFromDB() {
             }
         }
 
-        playerStats.lastSyncedStageIndex = playerStats.level;
-        saveUserData();
-        console.log('[Sync] Complete.');
+        playerStats.lastSyncedStageIndex = Math.max(playerStats.level || 0, playerStats.lastSyncedStageIndex || 0);
+        saveUserData({ touchLocalUpdatedAt: !shouldPullFromServer });
+
+        // If local looks newer, push it up once after login.
+        if (!shouldPullFromServer && localUpdatedAt > serverUpdatedAt) {
+            await syncCharacterToDB();
+        }
+
+        console.log('[Sync] Reconcile complete.');
     } catch (e) {
         console.error('[Sync] Failed:', e);
     }
@@ -750,6 +839,8 @@ async function syncCharacterToDB() {
             const aliveChar = existingChars.find(c => c.isAlive) || existingChars[0];
             playerStats.dbCharacterId = aliveChar.id;
             playerStats.lastSyncedStageIndex = aliveChar.stageIndex ?? aliveChar.stage_index ?? 0;
+            playerStats.serverVersion = aliveChar.version ?? playerStats.serverVersion ?? 0;
+            playerStats.serverUpdatedAt = getServerUpdatedAtMillis(aliveChar.updatedAt);
             console.log('Linked to existing DB character:', aliveChar.id);
         } else {
             // Create new character
@@ -763,6 +854,9 @@ async function syncCharacterToDB() {
             );
             if (newChar) {
                 playerStats.dbCharacterId = newChar.id;
+                playerStats.serverVersion = newChar.version ?? 0;
+                playerStats.serverUpdatedAt = getServerUpdatedAtMillis(newChar.updatedAt);
+                playerStats.localUpdatedAt = playerStats.serverUpdatedAt;
             }
         }
         saveUserData();
@@ -774,17 +868,28 @@ async function syncCharacterToDB() {
             playerStats.level || 0,
             playerStats.lastSyncedStageIndex || 0
         );
+        const assignedHouseId = ensureAssignedHouseId();
 
         const updated = await updateCharacterInDB(playerStats.dbCharacterId, {
             happiness: playerStats.happiness,
             health: playerStats.hp,
             stageIndex: safeStageIndex,
+            homePlaceId: assignedHouseId || null,
             lastFedAt: playerStats.lastFedTime ? new Date(playerStats.lastFedTime).toISOString() : null,
             lastPlayedAt: playerStats.lastPlayTime ? new Date(playerStats.lastPlayTime).toISOString() : null
         });
 
-        if (updated && typeof updated.stageIndex === 'number') {
-            playerStats.lastSyncedStageIndex = updated.stageIndex;
+        if (updated) {
+            if (typeof updated.stageIndex === 'number') {
+                playerStats.lastSyncedStageIndex = updated.stageIndex;
+            } else {
+                playerStats.lastSyncedStageIndex = safeStageIndex;
+            }
+            if (typeof updated.version === 'number') {
+                playerStats.serverVersion = updated.version;
+            }
+            playerStats.serverUpdatedAt = getServerUpdatedAtMillis(updated.updatedAt);
+            playerStats.localUpdatedAt = playerStats.serverUpdatedAt || Date.now();
         } else {
             playerStats.lastSyncedStageIndex = safeStageIndex;
         }
@@ -2046,8 +2151,22 @@ ipcMain.handle('friend-get-requests', async (event, { direction = 'incoming', st
     try {
         const characterId = await getOrSyncCharacterId();
         if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
-        const data = await getFriendRequests(characterId, direction, status);
+
         const bootstrap = await getBootstrapSafe();
+        const me = bootstrap?.characters?.find((c) => c.id === characterId) || null;
+
+        if (direction === 'incoming' && status === 'PENDING' && Array.isArray(me?.incomingFriendRequests)) {
+            const incoming = me.incomingFriendRequests.map((r) => ({
+                ...r,
+                otherCharacterId: r.requesterCharacterId,
+                otherName: r.requesterName || null,
+                otherInviteCode: r.requesterInviteCode || null,
+                otherSpecies: r.requesterSpecies || null
+            }));
+            return { success: true, data: incoming };
+        }
+
+        const data = await getFriendRequests(characterId, direction, status);
         const characterMap = getCharacterDetailsMap(bootstrap?.characters || []);
 
         const enriched = data.map((r) => {
@@ -2093,7 +2212,10 @@ ipcMain.handle('friend-get-friends', async () => {
     try {
         const characterId = await getOrSyncCharacterId();
         if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
-        const data = await getFriends(characterId);
+
+        const bootstrap = await getBootstrapSafe();
+        const me = bootstrap?.characters?.find((c) => c.id === characterId) || null;
+        const data = Array.isArray(me?.friends) ? me.friends : await getFriends(characterId);
 
         // Intimacy milestone: 100 => lover, and then child once.
         const lover = data.find((f) => (f.intimacy || 0) >= 100);
