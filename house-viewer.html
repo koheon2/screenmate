@@ -78,6 +78,32 @@
             font-weight: 600;
         }
 
+        .time-debug {
+            position: fixed;
+            left: 20px;
+            top: 72px;
+            z-index: 130;
+            background: rgba(0, 0, 0, 0.72);
+            color: #fff;
+            padding: 8px 10px;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            width: 220px;
+            -webkit-app-region: no-drag;
+            pointer-events: auto;
+        }
+
+        .time-debug label {
+            font-size: 11px;
+            opacity: 0.9;
+        }
+
+        .time-debug input[type="range"] {
+            width: 100%;
+        }
+
         .hint {
             position: fixed;
             left: 24px;
@@ -190,6 +216,10 @@
         <button class="debug-btn" id="place-desk">책상</button>
         <button class="debug-btn" id="place-floor">바닥</button>
     </div>
+    <div class="time-debug">
+        <label for="time-range">시간 디버그: <span id="time-val">시스템</span></label>
+        <input id="time-range" type="range" min="0" max="24" step="0.25" value="12">
+    </div>
     <div class="ui">
         <button class="btn" id="close-btn">닫기 (Esc)</button>
     </div>
@@ -215,6 +245,8 @@
         const placeBedBtn = document.getElementById('place-bed');
         const placeDeskBtn = document.getElementById('place-desk');
         const placeFloorBtn = document.getElementById('place-floor');
+        const timeRange = document.getElementById('time-range');
+        const timeVal = document.getElementById('time-val');
 
         function closeViewer() {
             ipcRenderer.send('close-house-viewer');
@@ -234,6 +266,25 @@
         placeBedBtn.addEventListener('click', () => place('bed'));
         placeDeskBtn.addEventListener('click', () => place('desk'));
         placeFloorBtn.addEventListener('click', () => place('floor'));
+
+        function setDebugHour(hour) {
+            if (typeof window.__setDebugHour === 'function') {
+                window.__setDebugHour(hour);
+            }
+        }
+
+        timeRange.addEventListener('input', (e) => {
+            const hour = Number(e.target.value);
+            timeVal.textContent = `${hour.toFixed(2)}h`;
+            setDebugHour(hour);
+        });
+
+        timeRange.addEventListener('dblclick', () => {
+            timeVal.textContent = '시스템';
+            if (typeof window.__setDebugHour === 'function') {
+                window.__setDebugHour(null);
+            }
+        });
 
         function showHouse() {
             document.body.classList.add('house-show');

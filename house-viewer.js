@@ -11,6 +11,7 @@ const isFull = params.get('mode') === 'full';
 const spriteUrl = params.get('img');
 const modelFile = params.get('model') || 'house.glb';
 const placeName = params.get('placeName') || '장소';
+const placeId = params.get('placeId') || 'house1';
 const DEBUG_PLACE = true;
 const PLACEMENTS = {
     bed: { x: -0.926, y: 0.6, z: 0.344 },
@@ -20,6 +21,7 @@ const PLACEMENTS = {
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
+scene.fog = new THREE.Fog(0x000000, 140, 900);
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
 
@@ -33,6 +35,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -43,20 +47,172 @@ controls.zoomSpeed = 0.8;
 controls.minDistance = 1.2;
 controls.maxDistance = isFull ? 12 : 6;
 
-// Lighting
-const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+// Lighting (time-of-day aware)
+const ambient = new THREE.AmbientLight(0xffffff, 0.7);
 scene.add(ambient);
 
-const keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
-keyLight.position.set(4, 6, 3);
-scene.add(keyLight);
+const sunLight = new THREE.DirectionalLight(0xfff0d6, 1.0);
+sunLight.position.set(6, 10, 4);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.camera.near = 0.5;
+sunLight.shadow.camera.far = 80;
+sunLight.shadow.camera.left = -20;
+sunLight.shadow.camera.right = 20;
+sunLight.shadow.camera.top = 20;
+sunLight.shadow.camera.bottom = -20;
+scene.add(sunLight);
 
-const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
-fillLight.position.set(-4, 2, -3);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.35);
+fillLight.position.set(-5, 4, -6);
 scene.add(fillLight);
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0x888888, 0.4);
+const hemi = new THREE.HemisphereLight(0x9ecbff, 0x1a1a1a, 0.45);
 scene.add(hemi);
+
+// Sky dome + stars + moon
+const skyDome = new THREE.Mesh(
+    new THREE.SphereGeometry(800, 32, 32),
+    new THREE.MeshBasicMaterial({ color: 0x87b8ff, side: THREE.BackSide })
+);
+scene.add(skyDome);
+
+const starCount = 600;
+const starPositions = new Float32Array(starCount * 3);
+for (let i = 0; i < starCount; i += 1) {
+    const r = 500 + Math.random() * 200;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(1 - 2 * Math.random());
+    starPositions[i * 3 + 0] = r * Math.sin(phi) * Math.cos(theta);
+    starPositions[i * 3 + 1] = Math.abs(r * Math.cos(phi));
+    starPositions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+}
+const starGeo = new THREE.BufferGeometry();
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+const stars = new THREE.Points(
+    starGeo,
+    new THREE.PointsMaterial({ color: 0xffffff, size: 3.6, sizeAttenuation: true, transparent: true, opacity: 0 })
+);
+scene.add(stars);
+
+const moon = new THREE.Mesh(
+    new THREE.SphereGeometry(5, 24, 24),
+    new THREE.MeshBasicMaterial({ color: 0xf4f6ff })
+);
+moon.position.set(-40, 30, -80);
+moon.visible = false;
+scene.add(moon);
+
+const sun = new THREE.Mesh(
+    new THREE.SphereGeometry(7, 28, 28),
+    new THREE.MeshBasicMaterial({ color: 0xffe6b3 })
+);
+sun.position.set(60, 60, -120);
+sun.visible = true;
+scene.add(sun);
+
+// Infinite-feeling ground plane
+const GROUND_COLORS = {
+    house1: 0x2f3a2e,
+    house2: 0x33402f,
+    house3: 0x3a352c,
+    house4: 0x2b3238,
+    house5: 0x3a2f36,
+    house6: 0x2f2f2f,
+    park: 0x2e4a2f,
+    park2: 0x3b5a36,
+    bakery: 0x4a3a2a,
+    pharmacy: 0x24373a,
+    school: 0x3a3526,
+    police: 0x1f2b3c,
+    gym: 0x2b2b2b,
+    toilet: 0x2a3136,
+    cradle: 0x3a2f2a,
+};
+const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(2000, 2000),
+    new THREE.MeshStandardMaterial({
+        color: GROUND_COLORS[placeId] || 0x2f3a2e,
+        roughness: 0.95,
+        metalness: 0.0
+    })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -1.05;
+ground.receiveShadow = true;
+scene.add(ground);
+
+let debugHour = null;
+
+function applyTimeOfDayLighting(hourOverride = null) {
+    const hour = (hourOverride !== null && !Number.isNaN(hourOverride))
+        ? hourOverride
+        : new Date().getHours() + new Date().getMinutes() / 60;
+    // Map 6..18 to 0..1, clamp outside to night edges.
+    const dayT = Math.min(1, Math.max(0, (hour - 6) / 12));
+    const isNight = hour < 6 || hour > 18;
+
+    // Sunrise/sunset tinting near the edges of the day.
+    const edge = Math.min(dayT, 1 - dayT) * 2; // 0 at edges, 1 mid-day
+    const warm = new THREE.Color(0xffb56b);
+    const cool = new THREE.Color(0xfff1dc);
+    const sunColor = cool.clone().lerp(warm, 1 - edge);
+
+    sunLight.color.copy(isNight ? new THREE.Color(0x6f7ea6) : sunColor);
+
+    ambient.intensity = isNight ? 0.22 : 0.45 + dayT * 0.35;
+    hemi.intensity = isNight ? 0.25 : 0.35 + dayT * 0.2;
+
+    // Sky colors: blue -> sunset -> night -> sunrise
+    const daySky = new THREE.Color(0x7db7ff);
+    const sunsetSky = new THREE.Color(0xff9966);
+    const nightSky = new THREE.Color(0x05070f);
+
+    let skyColor = daySky.clone();
+    if (isNight) {
+        skyColor.copy(nightSky);
+    } else if (hour < 9) {
+        const t = Math.max(0, Math.min(1, (hour - 6) / 3));
+        skyColor = sunsetSky.clone().lerp(daySky, t);
+    } else if (hour > 15) {
+        const t = Math.max(0, Math.min(1, (18 - hour) / 3));
+        skyColor = sunsetSky.clone().lerp(daySky, t);
+    }
+
+    skyDome.material.color.copy(skyColor);
+    scene.fog.color.copy(skyColor.clone().lerp(new THREE.Color(0x000000), 0.55));
+
+    // Stars and moon at night
+    const nightStrength = isNight ? 1 : Math.max(0, 1 - dayT * 1.8) * 0.8;
+    stars.material.opacity = Math.min(1, nightStrength);
+    stars.visible = stars.material.opacity > 0.02;
+
+    const sunAngle = ((hour - 6) / 24) * Math.PI * 2;
+    const sunPos = new THREE.Vector3(
+        Math.cos(sunAngle) * 60,
+        55 + Math.sin(sunAngle) * 40,
+        0
+    );
+    sun.position.copy(sunPos);
+
+    // Keep the light aligned with the sun's apparent position.
+    sunLight.position.copy(sunPos.clone().multiplyScalar(0.9));
+    const sunAboveHorizon = sunPos.y > 8;
+    sunLight.intensity = sunAboveHorizon ? (0.55 + dayT * 0.75) : 0.05;
+    sun.visible = sunAboveHorizon;
+
+    // Moon follows the exact opposite arc of the sun.
+    const moonPos = sunPos.clone().multiplyScalar(-1);
+    moon.position.copy(moonPos);
+    moon.visible = !sunAboveHorizon;
+}
+
+applyTimeOfDayLighting();
+
+window.__setDebugHour = (hour) => {
+    debugHour = Number.isFinite(hour) ? hour : null;
+    applyTimeOfDayLighting(debugHour);
+};
 
 
 let modelRoot = null;
@@ -93,6 +249,12 @@ loader.load(
     modelUrl,
     (gltf) => {
         modelRoot = gltf.scene;
+        modelRoot.traverse((obj) => {
+            if (obj.isMesh) {
+                obj.castShadow = true;
+                obj.receiveShadow = true;
+            }
+        });
         scene.add(modelRoot);
 
         // Center and scale model
@@ -183,6 +345,7 @@ resize();
 
 function animate() {
     requestAnimationFrame(animate);
+    applyTimeOfDayLighting(debugHour);
     controls.update();
     renderer.render(scene, camera);
 }
