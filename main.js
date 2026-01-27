@@ -71,10 +71,21 @@ const deviceDataPath = path.join(app.getPath('userData'), 'device-data.json');
 const authDataPath = path.join(app.getPath('userData'), 'auth-data.json');
 
 const PLACES = [
-    { id: 'home', name: '집', icon: '🏠', model: 'house.glb' },
-    { id: 'desk', name: '작업실', icon: '🪑', model: 'desk.glb' },
+    { id: 'house1', name: '집 1', icon: '🏠', model: 'house1.glb' },
+    { id: 'house2', name: '집 2', icon: '🏠', model: 'house2.glb' },
+    { id: 'house3', name: '집 3', icon: '🏠', model: 'house3.glb' },
+    { id: 'house4', name: '집 4', icon: '🏠', model: 'house4.glb' },
+    { id: 'house5', name: '집 5', icon: '🏠', model: 'house5.glb' },
+    { id: 'house6', name: '집 6', icon: '🏠', model: 'house6.glb' },
     { id: 'park', name: '공원', icon: '🌿', model: 'park.glb' },
-    { id: 'cafe', name: '카페', icon: '☕', model: 'cafe.glb' },
+    { id: 'park2', name: '공원 2', icon: '🌿', model: 'park2.glb' },
+    { id: 'bakery', name: '빵집', icon: '🥐', model: 'bakery.glb' },
+    { id: 'pharmacy', name: '약국', icon: '💊', model: 'pharmacy.glb' },
+    { id: 'school', name: '학교', icon: '🏫', model: 'school.glb' },
+    { id: 'police', name: '경찰서', icon: '🚓', model: 'police_station.glb' },
+    { id: 'gym', name: '헬스장', icon: '🏋️', model: 'gym.glb' },
+    { id: 'toilet', name: '화장실', icon: '🚽', model: 'toilet.glb' },
+    { id: 'cradle', name: '요람', icon: '🛏️', model: 'cradle.glb' },
 ];
 
 const INITIAL_STATS = {
@@ -1082,6 +1093,14 @@ ipcMain.handle('start-peek', () => {
     saveUserData();
     const discoveredPlaces = playerStats.discoveredPlaces.map((id) => getPlaceById(id));
     return { place, isNew, discoveredPlaces };
+});
+
+ipcMain.handle('get-places', () => {
+    const discovered = new Set(playerStats.discoveredPlaces || []);
+    return PLACES.map((place) => ({
+        ...place,
+        unlocked: discovered.has(place.id)
+    }));
 });
 
 ipcMain.on('open-house-viewer', (event, payload = {}) => {
