@@ -211,6 +211,7 @@
         const curtainOverlay = document.getElementById('curtain-overlay');
         const params = new URLSearchParams(window.location.search);
         const capturedScreenUrl = params.get('screen') || '';
+        const isNewPlace = params.get('isNew') === '1';
         const placeBedBtn = document.getElementById('place-bed');
         const placeDeskBtn = document.getElementById('place-desk');
         const placeFloorBtn = document.getElementById('place-floor');
@@ -310,6 +311,11 @@
         async function runDoorSequence() {
             curtainOverlay.classList.add('opened');
             curtainOverlay.style.pointerEvents = 'none';
+            if (!isNewPlace) {
+                doorOverlay.classList.add('cleared');
+                showHouse();
+                return;
+            }
             if (!capturedScreenUrl) {
                 // Fallback: just show the house with the soft dim transition.
                 setTimeout(showHouse, 120);

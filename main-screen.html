@@ -346,11 +346,107 @@
             text-decoration: underline;
         }
 
+        .achievements-modal {
+            max-width: 320px;
+            text-align: left;
+        }
+
+        .achievements-list {
+            max-height: 260px;
+            overflow: auto;
+            margin-top: 6px;
+            padding-right: 4px;
+        }
+
+        .achievement-item {
+            border: 1px solid #e5e5e5;
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #fafafa;
+        }
+
+        .achievement-item.locked {
+            opacity: 0.65;
+            background: #f2f2f2;
+        }
+
+        .achievement-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #222;
+            margin-bottom: 4px;
+        }
+
+        .achievement-desc {
+            font-size: 12px;
+            color: #555;
+        }
+
+        .places-modal {
+            max-width: 320px;
+            text-align: left;
+        }
+
+        .places-list {
+            max-height: 260px;
+            overflow: auto;
+            margin-top: 6px;
+            padding-right: 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .place-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border: 1px solid #e5e5e5;
+            border-radius: 10px;
+            background: #fafafa;
+            cursor: pointer;
+        }
+
+        .place-row:hover {
+            background: #f3f3f3;
+        }
+
+        .place-badge {
+            width: 36px;
+            height: 36px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #111;
+            color: #fff;
+            font-size: 18px;
+        }
+
+        .place-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .place-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: #222;
+        }
+
+        .place-sub {
+            font-size: 11px;
+            color: #666;
+        }
+
         .discovered-column {
             position: fixed;
             right: 14px;
             top: 90px;
-            display: flex;
+            display: none;
             flex-direction: column;
             gap: 10px;
             z-index: 60;
@@ -453,6 +549,8 @@
         <button class="start-btn" id="start-btn">Start</button>
         <button class="play-btn" id="play-btn">놀아주기 (준비중)</button>
         <button class="play-btn" id="house-btn" style="margin-top: 10px; background: #222;">엿보기</button>
+        <button class="play-btn" id="places-btn" style="margin-top: 10px; background: #2b2b2b;">장소</button>
+        <button class="play-btn" id="achievements-btn" style="margin-top: 10px; background: #444;">업적</button>
 
         <div class="toggle-container">
             <span class="toggle-label">집중 모드</span>
@@ -473,15 +571,59 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="achievements-modal">
+        <div class="modal achievements-modal">
+            <h3>업적</h3>
+            <div class="achievements-list" id="achievements-list"></div>
+            <div class="modal-close" id="close-achievements">닫기</div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="places-modal">
+        <div class="modal places-modal">
+            <h3>발견한 장소</h3>
+            <div class="places-list" id="places-list"></div>
+            <div class="modal-close" id="close-places">닫기</div>
+        </div>
+    </div>
+
     <script>
         const { ipcRenderer } = require('electron');
         const discoveredColumn = document.getElementById('discovered-column');
         const placeToast = document.getElementById('place-toast');
+        const achievementsModal = document.getElementById('achievements-modal');
+        const achievementsList = document.getElementById('achievements-list');
+        const placesModal = document.getElementById('places-modal');
+        const placesList = document.getElementById('places-list');
+
+        const ACHIEVEMENTS = [
+            { id: 'first-peek', title: '첫 엿보기', desc: '처음으로 엿보기를 사용했다.', unlocked: true },
+            { id: 'pet-starter', title: '입양 완료', desc: '펫을 입양하고 시작했다.', unlocked: true },
+            { id: 'wanderer', title: '방랑자', desc: '서로 다른 장소 3곳을 발견했다.', unlocked: false },
+            { id: 'night-owl', title: '올빼미', desc: '늦은 밤에도 펫을 돌봤다.', unlocked: false },
+        ];
 
         function showToast(message) {
             placeToast.textContent = message;
             placeToast.classList.add('show');
             setTimeout(() => placeToast.classList.remove('show'), 1800);
+        }
+
+        function renderAchievements() {
+            achievementsList.innerHTML = '';
+            ACHIEVEMENTS.forEach((a) => {
+                const item = document.createElement('div');
+                item.className = `achievement-item${a.unlocked ? '' : ' locked'}`;
+                const title = document.createElement('div');
+                title.className = 'achievement-title';
+                title.textContent = `${a.unlocked ? '✅' : '🔒'} ${a.title}`;
+                const desc = document.createElement('div');
+                desc.className = 'achievement-desc';
+                desc.textContent = a.desc;
+                item.appendChild(title);
+                item.appendChild(desc);
+                achievementsList.appendChild(item);
+            });
         }
 
         function renderDiscoveredPlaces(places = []) {
@@ -496,6 +638,42 @@
                     ipcRenderer.send('open-house-viewer', { placeId: place.id, isNew: false });
                 });
                 discoveredColumn.appendChild(btn);
+            });
+            renderPlacesModal(places);
+        }
+
+        function renderPlacesModal(places = []) {
+            placesList.innerHTML = '';
+            if (!places.length) {
+                const empty = document.createElement('div');
+                empty.className = 'achievement-desc';
+                empty.textContent = '아직 발견한 장소가 없어요.';
+                placesList.appendChild(empty);
+                return;
+            }
+            places.forEach((place) => {
+                const row = document.createElement('div');
+                row.className = 'place-row';
+                const badge = document.createElement('div');
+                badge.className = 'place-badge';
+                badge.textContent = place.icon || '●';
+                const meta = document.createElement('div');
+                meta.className = 'place-meta';
+                const name = document.createElement('div');
+                name.className = 'place-name';
+                name.textContent = place.name;
+                const sub = document.createElement('div');
+                sub.className = 'place-sub';
+                sub.textContent = '발견 완료';
+                meta.appendChild(name);
+                meta.appendChild(sub);
+                row.appendChild(badge);
+                row.appendChild(meta);
+                row.addEventListener('click', () => {
+                    ipcRenderer.send('open-house-viewer', { placeId: place.id, isNew: false });
+                    placesModal.style.display = 'none';
+                });
+                placesList.appendChild(row);
             });
         }
 
@@ -636,8 +814,28 @@
             });
         });
 
+        document.getElementById('achievements-btn').addEventListener('click', () => {
+            renderAchievements();
+            achievementsModal.style.display = 'flex';
+        });
+
+        document.getElementById('places-btn').addEventListener('click', () => {
+            ipcRenderer.invoke('get-player-status').then((stats) => {
+                renderPlacesModal(stats.discoveredPlaces || []);
+                placesModal.style.display = 'flex';
+            });
+        });
+
         document.getElementById('close-modal').addEventListener('click', () => {
             document.getElementById('play-modal').style.display = 'none';
+        });
+
+        document.getElementById('close-achievements').addEventListener('click', () => {
+            achievementsModal.style.display = 'none';
+        });
+
+        document.getElementById('close-places').addEventListener('click', () => {
+            placesModal.style.display = 'none';
         });
 
         // Listen for UI state updates from main process
