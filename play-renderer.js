@@ -6,6 +6,8 @@ const gameMsg = document.getElementById('game-msg');
 const timerEl = document.getElementById('timer');
 const closeBtn = document.getElementById('close-btn');
 const character = document.getElementById('game-character');
+const partnerImg = document.getElementById('game-partner');
+const eggImg = document.getElementById('game-egg');
 
 let currentMode = null;
 let gameTimer = null;
@@ -20,12 +22,13 @@ let activeItem = null; // 'ball' or 'food' string
 let ballState = { x: 0, y: 0, vx: 0, vy: 0, isFlying: false };
 let foodState = { x: 0, y: 0 };
 let charState = { x: 0, y: 0, vx: 0, vy: 0 };
+let partnerState = { x: 0, y: 0 }; // For breeding partner
 
 // For velocity calculation
 let dragHistory = [];
 
 // --- INIT ---
-ipcRenderer.on('init-game', (event, { mode, startPos, characterImage }) => {
+ipcRenderer.on('init-game', (event, { mode, startPos, characterImage, partner }) => {
     currentMode = mode;
 
     // Set character image
@@ -42,6 +45,31 @@ ipcRenderer.on('init-game', (event, { mode, startPos, characterImage }) => {
         charState.y = window.innerHeight / 2 - 125;
     }
 
+    // Breeding Specific Init
+    if (mode === 'breeding') {
+        // Center position somewhat
+        charState.x = window.innerWidth / 2 - 100;
+        charState.y = window.innerHeight / 2;
+
+        partnerState.x = window.innerWidth / 2 + 20;
+        partnerState.y = window.innerHeight / 2;
+
+        // Force Mametchi for testing per request
+        partnerImg.src = 'assets/level3/mametchi/normal.webp';
+
+        // Callback if webp fails
+        partnerImg.onerror = () => {
+            partnerImg.src = 'assets/level3/mametchi/normal.png';
+        };
+
+        partnerImg.style.display = 'block';
+        character.style.display = 'block';
+        render(); // Initial placement
+
+        startBreedingSequence();
+        return;
+    }
+
     // Init Item Positions
     ballState.x = window.innerWidth / 2 - 32;
     ballState.y = window.innerHeight - 200;
@@ -56,6 +84,75 @@ ipcRenderer.on('init-game', (event, { mode, startPos, characterImage }) => {
     // Start immediately without message
     startGame(mode);
 });
+
+function startBreedingSequence() {
+    // Text Removed per request
+    // gameMsg.textContent = '❤️ 뽀뽀 중... ❤️';
+    // gameMsg.classList.add('visible');
+
+    // Kiss animation: Move closer
+    let step = 0;
+    const interval = setInterval(() => {
+        step++;
+        // Move towards each other
+        if (step < 20) {
+            charState.x += 1;
+            partnerState.x -= 1;
+        }
+        // Shake/Heart effect
+        if (step > 20 && step < 60) {
+            if (step % 5 === 0) createHeart((charState.x + partnerState.x) / 2 + 60, charState.y);
+        }
+
+        render();
+
+        if (step >= 80) {
+            clearInterval(interval);
+            finishBreeding();
+        }
+    }, 50);
+}
+
+function createHeart(x, y) {
+    const el = document.createElement('div');
+    el.textContent = '❤️';
+    el.style.position = 'absolute';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.fontSize = '30px';
+    el.style.zIndex = 100;
+    document.body.appendChild(el);
+
+    // Animate up
+    let op = 1;
+    let top = y;
+    const anim = setInterval(() => {
+        top -= 2;
+        op -= 0.05;
+        el.style.top = top + 'px';
+        el.style.opacity = op;
+        if (op <= 0) {
+            clearInterval(anim);
+            el.remove();
+        }
+    }, 30);
+}
+
+function finishBreeding() {
+    gameMsg.textContent = '알이 나타났다!';
+    character.style.display = 'none';
+    partnerImg.style.display = 'none';
+
+    eggImg.src = 'assets/egg.svg';
+    eggImg.style.display = 'block';
+    eggImg.style.left = (window.innerWidth / 2 - 40) + 'px';
+    eggImg.style.top = (window.innerHeight / 2 - 50) + 'px';
+
+    // Add click listener to egg
+    eggImg.onclick = () => {
+        ipcRenderer.send('egg-acquired');
+    };
+}
 
 function startGame(mode) {
     if (mode === 'ball') {
@@ -94,7 +191,7 @@ function checkHit(el, x, y) {
 }
 
 window.addEventListener('mousedown', (e) => {
-    if (isDragging) return;
+    if (isDragging || currentMode === 'breeding') return; // Disable drag in breeding
 
     // Check what we clicked
     if (currentMode === 'ball' && checkHit(ball, e.clientX, e.clientY)) {
@@ -192,7 +289,7 @@ function loop() {
     updateCharacterAI();
     render();
 
-    if (currentMode) requestAnimationFrame(loop);
+    if (currentMode && currentMode !== 'breeding') requestAnimationFrame(loop);
 }
 
 let isHoldingBall = false;
@@ -311,6 +408,10 @@ function render() {
         ball.style.transform = `translate(${ballState.x}px, ${ballState.y}px)`;
     } else if (currentMode === 'food') {
         food.style.transform = `translate(${foodState.x}px, ${foodState.y}px)`;
+    } else if (currentMode === 'breeding') {
+        // Fixed positioning? No, we update charState.
+        // Also render partner
+        partnerImg.style.transform = `translate(${partnerState.x}px, ${partnerState.y}px) scaleX(-1)`; // Face left
     }
 }
 
