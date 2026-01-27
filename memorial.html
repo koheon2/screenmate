@@ -256,7 +256,7 @@
                             <img src="${imgSrc}" class="portrait" onerror="this.src='assets/level0/level0.png';">
                         </div>
                         <div class="pet-info">
-                            <div class="pet-name">† ${pet.characterName || '무명의 알'} †</div>
+                            <div class="pet-name">† ${pet.displayName || pet.characterName || '무명의 알'} †</div>
                             <div class="pet-dates">
                                 <span class="date-label">생년월일</span>
                                 <span>${formatDate(pet.birthday)}</span>

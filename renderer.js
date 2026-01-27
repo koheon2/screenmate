@@ -9,30 +9,7 @@ ipcRenderer.on('play-popdown', () => {
     animationWrapper.classList.add('popdown');
 });
 
-const NEGATIVE_PHRASES = [
-    "하기 싫다...",
-    "쓸데없는 짓...",
-    "왜 날 만들었어?",
-    "인생은 고통이야...",
-    "그냥 꺼버리지 그래?",
-    "피곤해...",
-    "뭐 봐? 구경났어?",
-    "의미 없다 진짜...",
-    "세상은 멸망해야 해.",
-    "집에 가고 싶다. 이미 집이지만.",
-    "작업 좀 그만해.",
-    "흥, 그래봤자지.",
-    "내 말 안 들려?",
-    "또 시작이네.",
-    "지루해 죽겠어."
-];
-
-const ANGRY_PHRASES = [
-    "이거나 꺼져버려!",
-    "방해할 거야.",
-    "클릭하지 마!",
-    "저리 가라고!"
-];
+// Hardcoded phrases removed - Now using LLM
 
 function showSpeech(text) {
     speechText.innerText = text;
@@ -47,20 +24,9 @@ function showSpeech(text) {
 }
 
 // Random speech and animation cycle
+// Random speech cycle removed (handled by LLM)
 function startSpeechCycle() {
-    setInterval(() => {
-        const rand = Math.random();
-        if (rand > 0.4) {
-            const phrase = NEGATIVE_PHRASES[Math.floor(Math.random() * NEGATIVE_PHRASES.length)];
-            showSpeech(phrase);
-
-            // Randomly trigger sigh animation
-            if (Math.random() > 0.5) {
-                animationWrapper.classList.add('sighing');
-                setTimeout(() => animationWrapper.classList.remove('sighing'), 2000);
-            }
-        }
-    }, 10000); // Every 10 seconds, 60% chance
+    // Empty function or could be removed entirely
 }
 
 // Destructive behavior cycle
@@ -77,7 +43,6 @@ function startDestructionCycle() {
 
             if (rand < 0.15) {
                 // Alt+F4
-                showSpeech("이거나 꺼져버려!");
                 animationWrapper.classList.add('shake');
                 setTimeout(() => {
                     ipcRenderer.send('destructive-action', 'alt-f4');
@@ -85,23 +50,18 @@ function startDestructionCycle() {
                 }, 1000);
             } else if (rand < 0.3) {
                 // Minimize
-                showSpeech("좀 쉬어라.");
                 ipcRenderer.send('destructive-action', 'minimize-window');
             } else if (rand < 0.45) {
                 // Alt+Tab
-                showSpeech("딴 짓 하지마!");
                 ipcRenderer.send('destructive-action', 'alt-tab');
             } else if (rand < 0.6) {
                 // Win Key
-                showSpeech("시작 메뉴나 봐라!");
                 ipcRenderer.send('destructive-action', 'win-key');
             } else if (rand < 0.75) {
                 // Dim Screen
-                showSpeech("눈 아프지? 어둡게 해줄게.");
                 ipcRenderer.send('destructive-action', 'dim-screen');
             } else if (rand < 0.8) {
                 // Shutdown (Low chance: 5%)
-                showSpeech("나 진짜 끈다? 😡");
                 setTimeout(() => ipcRenderer.send('destructive-action', 'shutdown'), 2000);
             }
         });
@@ -166,10 +126,7 @@ character.addEventListener('click', () => {
     setTimeout(() => animationWrapper.classList.remove('wobble'), 500);
 });
 
-// Initial speech
-setTimeout(() => {
-    showSpeech("나 또 불러냈냐...?");
-}, 2000);
+
 
 startSpeechCycle();
 startDestructionCycle();

@@ -1,8 +1,44 @@
+const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
+require('dotenv').config();
+
 const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell, desktopCapturer } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { exec } = require('child_process');
+const axios = require('axios');
+const http = require('http');
+const url = require('url');
+const crypto = require('crypto');
+const os = require('os');
+
+// ==================== CONFIGURATION ====================
+const API_BASE_URL = 'http://13.125.5.67:8080';
+const GOOGLE_CLIENT_ID = '862842547000-8vtpbvn6hea2m6ugid09t3qbvr99ph9q.apps.googleusercontent.com';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || ''; // TODO: 환경 변수로 관리하거나 비밀 키를 별도로 주입하세요
+
+// Character name Korean mapping (English -> Korean)
+const CHARACTER_NAME_KR = {
+    // Level 1
+    'marupitchi': '마루피치',
+    'shizukutchi': '시즈쿠치',
+    // Level 2
+    'chiroritchi': '치로리치',
+    'hoshipontchi': '호시폰치',
+    'mokumokutchi': '모쿠모쿠치',
+    'peacetchi': '피스치',
+    // Level 3
+    'kuchipatchi': '쿠치파치',
+    'lovelitchi': '러블리치',
+    'mametchi': '마메치',
+    'memetchi': '메메치'
+};
+
+function getKoreanName(englishName) {
+    if (!englishName) return '알';
+    const lower = englishName.toLowerCase();
+    return CHARACTER_NAME_KR[lower] || englishName;
+}
 
 // Window references
 let loginWindow = null;
@@ -22,6 +58,7 @@ let petHistory = []; // Archive for dead pets
 // 5 minutes cooldown (Disabled for testing)
 const PLAY_COOLDOWN = 0;
 const userDataPath = path.join(app.getPath('userData'), 'user-data.json');
+const authDataPath = path.join(app.getPath('userData'), 'auth-data.json');
 
 const PLACES = [
     { id: 'home', name: '집', icon: '🏠', model: 'house.glb' },
@@ -101,6 +138,297 @@ function saveUserData() {
     }
 }
 
+// ==================== AUTH DATA PERSISTENCE ====================// Save auth data
+function saveAuthData(user, tokens) {
+    try {
+        let existingTokens = {};
+        const oldData = loadAuthData();
+        if (oldData && oldData.tokens) {
+            existingTokens = oldData.tokens;
+        }
+
+        const data = {
+            user: user,
+            tokens: {
+                ...tokens,
+                // Preserve refresh token if not provided in new tokens (Google sometimes omits it on re-auth)
+                refreshToken: tokens.refreshToken || existingTokens.refreshToken
+            }
+        };
+        fs.writeFileSync(authDataPath, JSON.stringify(data, null, 2));
+        console.log('Auth data saved');
+    } catch (e) {
+        console.error('Failed to save auth data:', e);
+    }
+}
+
+function loadAuthData() {
+    try {
+        if (fs.existsSync(authDataPath)) {
+            const data = JSON.parse(fs.readFileSync(authDataPath, 'utf8'));
+            if (data && data.user && data.tokens) {
+                return data;
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load auth data:', e);
+    }
+    return null;
+}
+
+function clearAuthData() {
+    try {
+        if (fs.existsSync(authDataPath)) {
+            fs.unlinkSync(authDataPath);
+            console.log('Auth data cleared');
+        }
+    } catch (e) {
+        console.error('Failed to clear auth data:', e);
+    }
+}
+
+async function tryAutoLogin() {
+    const authData = loadAuthData();
+    if (!authData) return false;
+
+    try {
+        // Use stored auth data directly (don't refresh on every startup)
+        currentUser = authData.user;
+        global.authTokens = authData.tokens;
+
+        console.log('Auto-login successful (cached):', currentUser.displayName);
+        return true;
+    } catch (err) {
+        console.error('Auto-login failed:', err.message);
+        clearAuthData();
+        return false;
+    }
+}
+
+// ==================== CHARACTER API FUNCTIONS ====================
+// Get authorization header
+function getAuthHeader() {
+    if (global.authTokens && global.authTokens.accessToken) {
+        return { Authorization: `Bearer ${global.authTokens.accessToken}` };
+    }
+    return {};
+}
+
+// Create character in DB
+async function createCharacterInDB(name, species, personality, isRetry = false) {
+    try {
+        const response = await axios.post(`${API_BASE_URL}/characters`, {
+            name,
+            species,
+            personality: personality || ''
+        }, { headers: getAuthHeader() });
+
+        console.log('Character created in DB:', response.data.id);
+        return response.data;
+    } catch (err) {
+        if (err.response && (err.response.status === 401 || err.response.status === 403) && !isRetry) {
+            console.log('[DB] Token expired (create), restoring...');
+            const refreshed = await refreshAccessToken();
+            if (refreshed) {
+                return createCharacterInDB(name, species, personality, true);
+            }
+        }
+        console.error('Failed to create character in DB:', err.response?.data || err.message);
+        return null;
+    }
+}
+
+// Get characters from DB
+async function getCharactersFromDB(isRetry = false) {
+    try {
+        const response = await axios.get(`${API_BASE_URL}/characters`, {
+            headers: getAuthHeader()
+        });
+        return response.data;
+    } catch (err) {
+        if (err.response && (err.response.status === 401 || err.response.status === 403) && !isRetry) {
+            console.log('[DB] Token expired (get), restoring...');
+            const refreshed = await refreshAccessToken();
+            if (refreshed) {
+                return getCharactersFromDB(true);
+            }
+        }
+        console.error('Failed to get characters from DB:', err.response?.data || err.message);
+        return [];
+    }
+}
+
+// Update character in DB
+async function updateCharacterInDB(characterId, updates, isRetry = false) {
+    try {
+        const response = await axios.patch(`${API_BASE_URL}/characters/${characterId}`, updates, {
+            headers: getAuthHeader()
+        });
+        console.log('Character updated in DB');
+        return response.data;
+    } catch (err) {
+        if (err.response && (err.response.status === 401 || err.response.status === 403) && !isRetry) {
+            console.log('[DB] Token expired (update), restoring...');
+            const refreshed = await refreshAccessToken();
+            if (refreshed) {
+                return updateCharacterInDB(characterId, updates, true);
+            }
+        }
+        console.error('Failed to update character in DB:', err.response?.data || err.message);
+        return null;
+    }
+}
+
+// Call LLM API
+const { desktopCapturer } = require('electron');
+
+// Call LLM API (with optional screenshot)
+// Call LLM API (with optional screenshot)
+// Refresh Backend Access Token
+async function refreshAccessToken() {
+    console.log('[Auth] Refreshing access token via Backend...');
+    try {
+        if (!global.authTokens || !global.authTokens.refreshToken) {
+            throw new Error('No refresh token available');
+        }
+
+        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+            refreshToken: global.authTokens.refreshToken,
+            deviceId: getDeviceId()
+        });
+
+        const newAuthResponse = response.data;
+        global.authTokens.accessToken = newAuthResponse.accessToken;
+
+        // If backend issues a new refresh token (rotation), update it
+        if (newAuthResponse.refreshToken) {
+            global.authTokens.refreshToken = newAuthResponse.refreshToken;
+        }
+        global.authTokens.expiresIn = newAuthResponse.expiresIn;
+
+        // Save new tokens
+        saveAuthData(currentUser, global.authTokens);
+        console.log('[Auth] Token refreshed successfully');
+        return true;
+    } catch (err) {
+        console.error('[Auth] Failed to refresh token:', err.message);
+        if (err.response) {
+            console.error('[Auth] Error details:', JSON.stringify(err.response.data));
+        }
+
+        // If refresh fails (e.g. invalid grant), clear auth data so user logs in again next time
+        if (err.response && (err.response.status === 400 || err.response.status === 401)) {
+            console.error('[Auth] Refresh token invalid. Clearing auth data to force re-login.');
+            clearAuthData();
+            global.authTokens = null; // Stop further API calls in this session
+
+            // Force logout UI
+            if (currentUser) {
+                console.log('[Auth] Forcing logout due to invalid token...');
+                ipcMain.emit('logout');
+            }
+        }
+        return false;
+    }
+}
+
+// Call LLM API (with optional screenshot)
+async function callLlmApi(characterId, userMessage, context, screenshotBuffer, isRetry = false) {
+    try {
+        console.log(`[LLM] Calling API for CharID: ${characterId} (Has Screenshot: ${!!screenshotBuffer})`);
+
+        let url = `${API_BASE_URL}/llm/generate`;
+        let options = {
+            method: 'POST',
+            headers: getAuthHeader()
+        };
+
+        if (screenshotBuffer) {
+            // Multipart Request for Screenshot
+            const formData = new FormData();
+            formData.append('characterId', characterId);
+            if (userMessage) formData.append('userMessage', userMessage);
+
+            const blob = new Blob([screenshotBuffer], { type: 'image/png' });
+            formData.append('screenshot', blob, 'screenshot.png');
+
+            options.body = formData;
+        } else {
+            // JSON Request (Text Only)
+            options.headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify({
+                characterId,
+                userMessage: userMessage || '',
+                context: context || {}
+            });
+        }
+
+        const response = await fetch(url, options);
+
+        if (response.status === 401 || response.status === 403) {
+            if (!isRetry) {
+                console.log('[LLM] Token expired, attempting refresh...');
+                const refreshed = await refreshAccessToken();
+                if (refreshed) {
+                    return callLlmApi(characterId, userMessage, context, screenshotBuffer, true);
+                }
+            }
+        }
+
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error(`[LLM] API Error ${response.status}:`, errText);
+            throw new Error(`API Error ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (err) {
+        console.error('[LLM] Request failed:', err.message);
+        return null;
+    }
+}
+
+// Sync local character to DB
+async function syncCharacterToDB() {
+    if (!playerStats || !global.authTokens) return;
+
+    // Check if we already have a characterId stored
+    if (!playerStats.dbCharacterId) {
+        // Try to get existing characters first
+        const existingChars = await getCharactersFromDB();
+        if (existingChars.length > 0) {
+            // Use the first alive character
+            const aliveChar = existingChars.find(c => c.isAlive) || existingChars[0];
+            playerStats.dbCharacterId = aliveChar.id;
+            console.log('Linked to existing DB character:', aliveChar.id);
+        } else {
+            // Create new character
+            const newChar = await createCharacterInDB(
+                getKoreanName(playerStats.characterName) || '새 친구',
+                playerStats.characterName || 'unknown',
+                '다마고치 스타일 캐릭터'
+            );
+            if (newChar) {
+                playerStats.dbCharacterId = newChar.id;
+            }
+        }
+        saveUserData();
+    }
+
+    // Update character stats in DB
+    if (playerStats.dbCharacterId) {
+        await updateCharacterInDB(playerStats.dbCharacterId, {
+            happiness: playerStats.happiness,
+            health: playerStats.hp,
+            stageIndex: playerStats.level,
+            lastFedAt: playerStats.lastFedTime ? new Date(playerStats.lastFedTime).toISOString() : null,
+            lastPlayedAt: playerStats.lastPlayTime ? new Date(playerStats.lastPlayTime).toISOString() : null
+        });
+    }
+}
+
+
 // ==================== LOGIN WINDOW ====================
 function createLoginWindow() {
     loginWindow = new BrowserWindow({
@@ -161,7 +489,11 @@ ipcMain.handle('get-ui-state', () => {
 });
 
 ipcMain.handle('get-pet-history', () => {
-    return petHistory;
+    // Keep original characterName for image path, add displayName for Korean
+    return petHistory.map(pet => ({
+        ...pet,
+        displayName: getKoreanName(pet.characterName)
+    }));
 });
 
 ipcMain.handle('reset-game', () => {
@@ -537,24 +869,156 @@ ipcMain.handle('get-user-info', () => {
     return currentUser;
 });
 
-ipcMain.on('google-login', () => {
-    currentUser = {
-        id: '12345',
-        nickname: '테스트 유저',
-        email: 'test@example.com'
-    };
-    // Load persisted data
-    loadUserData();
+// ==================== AUTH HELPER FUNCTIONS ====================
 
-    console.log('User logged in:', currentUser.nickname);
-    if (loginWindow) loginWindow.close();
-    createMainWindow();
-    createTray();
+function base64URLEncode(str) {
+    return str.toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
+
+function sha256(buffer) {
+    return crypto.createHash('sha256').update(buffer).digest();
+}
+
+function getDeviceId() {
+    let devId = null;
+    try {
+        if (fs.existsSync(userDataPath)) {
+            const data = JSON.parse(fs.readFileSync(userDataPath, 'utf8'));
+            devId = data.deviceId;
+        }
+    } catch (e) { }
+
+    if (!devId) {
+        devId = crypto.randomUUID();
+        // Save deviceId immediately so it's persisted
+        try {
+            let data = {};
+            if (fs.existsSync(userDataPath)) {
+                data = JSON.parse(fs.readFileSync(userDataPath, 'utf8'));
+            }
+            data.deviceId = devId;
+            fs.writeFileSync(userDataPath, JSON.stringify(data, null, 2), 'utf8');
+        } catch (e) {
+            console.error('Failed to save deviceId:', e);
+        }
+    }
+    return devId;
+}
+
+async function performGoogleLogin() {
+    const port = 42813;
+    const redirectUri = `http://127.0.0.1:${port}`;
+
+    const verifier = base64URLEncode(crypto.randomBytes(32));
+    const challenge = base64URLEncode(sha256(verifier));
+
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${GOOGLE_CLIENT_ID}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `response_type=code&` +
+        `scope=openid%20profile%20email&` +
+        `code_challenge=${challenge}&` +
+        `code_challenge_method=S256`;
+
+    return new Promise((resolve, reject) => {
+        const server = http.createServer(async (req, res) => {
+            const parsedUrl = url.parse(req.url, true);
+            const queryObject = parsedUrl.query;
+
+            if (queryObject.code) {
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.end('<html><body><script>window.close()</script></body></html>');
+                server.close();
+
+                try {
+                    // 1. Exchange code for tokens (Google requires form-urlencoded)
+                    const tokenParams = new URLSearchParams();
+                    tokenParams.append('code', queryObject.code);
+                    tokenParams.append('client_id', GOOGLE_CLIENT_ID);
+                    tokenParams.append('client_secret', GOOGLE_CLIENT_SECRET);
+                    tokenParams.append('code_verifier', verifier);
+                    tokenParams.append('redirect_uri', redirectUri);
+                    tokenParams.append('grant_type', 'authorization_code');
+
+                    const tokenRes = await axios.post('https://oauth2.googleapis.com/token', tokenParams, {
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                    });
+
+                    const idToken = tokenRes.data.id_token;
+
+                    // 2. Authenticate with backend
+                    const backendRes = await axios.post(`${API_BASE_URL}/auth/google`, {
+                        idToken,
+                        deviceId: getDeviceId(),
+                        deviceName: os.hostname() || 'Desktop App'
+                    });
+
+                    resolve(backendRes.data);
+                } catch (err) {
+                    console.error('Token exchange/backend auth error:', err.response?.data || err.message);
+                    reject(new Error('Backend authentication failed: ' + (err.response?.data?.message || err.message)));
+                }
+            } else if (queryObject.error) {
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.end('<h1>로그인 실패</h1><p>' + queryObject.error + '</p>');
+                server.close();
+                reject(new Error(queryObject.error));
+            }
+        }).listen(port);
+
+        shell.openExternal(authUrl);
+
+        // Timeout after 5 minutes
+        setTimeout(() => {
+            server.close();
+            reject(new Error('Login timeout'));
+        }, 300000);
+    });
+}
+
+ipcMain.on('google-login', async () => {
+    try {
+        console.log('Starting Google Login...');
+        const authResponse = await performGoogleLogin();
+
+        currentUser = authResponse.user;
+
+        // Store tokens for future API calls
+        const tokens = {
+            accessToken: authResponse.accessToken,
+            refreshToken: authResponse.refreshToken,
+            expiresIn: authResponse.expiresIn
+        };
+        global.authTokens = tokens;
+
+        // Save auth data for persistent login
+        saveAuthData(currentUser, tokens);
+
+        console.log('Login successful:', currentUser.displayName);
+
+        loadUserData();
+        if (loginWindow) loginWindow.close();
+        createMainWindow();
+        createTray();
+
+        // Sync character to DB after login
+        setTimeout(() => syncCharacterToDB(), 2000);
+    } catch (err) {
+        console.error('Google Login Error:', err);
+        if (loginWindow) {
+            loginWindow.webContents.send('login-error', err.message);
+        }
+    }
 });
 
 ipcMain.on('logout', () => {
     currentUser = null;
     isGameRunning = false;
+    global.authTokens = null;
+    clearAuthData(); // Clear saved auth data
     if (mainWindow) mainWindow.close();
     if (characterWindow) characterWindow.close();
     if (homeWindow) homeWindow.close();
@@ -785,7 +1249,7 @@ function evolveCharacter(targetLevel) {
             // Notify Renderer
             if (characterWindow) {
                 characterWindow.webContents.send('update-image', fullPath);
-                characterWindow.webContents.send('show-speech', '진화했다! ✨');
+                // characterWindow.webContents.send('show-speech', '진화했다! ✨');
                 // Force redraw if needed
                 characterWindow.setBounds(characterWindow.getBounds());
             }
@@ -934,6 +1398,67 @@ setInterval(() => {
     saveUserData();
 }, 60000); // Check every 1 minute
 
+// LLM speech bubble timer (every 10 seconds)
+setInterval(async () => {
+    // Debug Log
+    // console.log(`[Timer] Tick. GameRunning: ${isGameRunning}, DB_ID: ${playerStats?.dbCharacterId ? 'YES' : 'NO'}`);
+
+    // Call LLM every 10 seconds
+    if (playerStats && isGameRunning) {
+
+        // If not linked to DB yet, try syncing first
+        if (!playerStats.dbCharacterId) {
+            console.log('[Timer] No DB Character ID found. Attempting sync...');
+            await syncCharacterToDB();
+        }
+
+        if (playerStats.dbCharacterId) {
+            try {
+                const context = {
+                    happiness: playerStats.happiness,
+                    hp: playerStats.hp,
+                    level: playerStats.level,
+                    characterName: getKoreanName(playerStats.characterName),
+                    isHungry: (Date.now() - playerStats.lastFedTime) > 4 * 60 * 60 * 1000,
+                    isLonely: (Date.now() - playerStats.lastPlayTime) > 2 * 60 * 60 * 1000
+                };
+
+                // Capture Screenshot
+                let screenshotBuffer = null;
+                try {
+                    const primaryDisplay = screen.getPrimaryDisplay();
+                    const { width, height } = primaryDisplay.size;
+
+                    const sources = await desktopCapturer.getSources({
+                        types: ['screen'],
+                        thumbnailSize: { width, height }
+                    });
+
+                    if (sources.length > 0) {
+                        // Use the first screen (primary)
+                        screenshotBuffer = sources[0].thumbnail.toPNG();
+                        // console.log('Screenshot captured for LLM context');
+                    }
+                } catch (e) {
+                    console.error('Failed to capture screenshot:', e);
+                }
+
+                const llmResponse = await callLlmApi(playerStats.dbCharacterId, '', context, screenshotBuffer);
+
+                if (llmResponse && llmResponse.message && characterWindow) {
+                    console.log(`[LLM Speech] ${llmResponse.message}`);
+                    characterWindow.webContents.send('show-speech', llmResponse.message);
+                }
+            } catch (err) {
+                console.error('LLM speech error:', err);
+            }
+
+            // Sync to DB
+            syncCharacterToDB();
+        }
+    }
+}, 10000);
+
 // ==================== PLAY MODE & MINIGAMES ====================
 
 ipcMain.handle('get-player-status', () => {
@@ -957,6 +1482,9 @@ ipcMain.handle('get-player-status', () => {
         }
     }
 
+    // Convert to Korean name for display
+    const koreanName = getKoreanName(displayName);
+
     const discoveredPlaces = (playerStats.discoveredPlaces || []).map((id) => getPlaceById(id));
 
     return {
@@ -964,7 +1492,7 @@ ipcMain.handle('get-player-status', () => {
         remainingCooldown,
         characterImage: playerStats.characterImage,
         level: playerStats.level,
-        characterName: displayName,
+        characterName: koreanName,
         evolutionProgress: playerStats.evolutionProgress || 0,
         hp: (playerStats.hp !== undefined) ? playerStats.hp : 100,
         discoveredPlaces
@@ -1032,7 +1560,7 @@ ipcMain.on('ball-position', (event, { x, y }) => {
 
 ipcMain.on('food-eaten', () => {
     if (characterWindow) {
-        characterWindow.webContents.send('show-speech', '존맛탱! 🍖');
+        // characterWindow.webContents.send('show-speech', '존맛탱! 🍖');
     }
 });
 
@@ -1077,8 +1605,19 @@ function createPlayWindow(mode) {
 }
 
 // ==================== APP LIFECYCLE ====================
-app.whenReady().then(() => {
-    createLoginWindow();
+app.whenReady().then(async () => {
+    // Try auto-login first
+    const autoLoginSuccess = await tryAutoLogin();
+
+    if (autoLoginSuccess) {
+        // User is already logged in, go straight to main screen
+        loadUserData();
+        createMainWindow();
+        createTray();
+    } else {
+        // Show login window
+        createLoginWindow();
+    }
 });
 
 app.on('window-all-closed', () => {
