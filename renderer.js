@@ -16,12 +16,17 @@ function showSpeech(text) {
     speechBubble.classList.remove('hidden');
     setTimeout(() => speechBubble.classList.add('visible'), 10);
 
-    // Hide after 3 seconds
+    // Hide after 8 seconds
     setTimeout(() => {
         speechBubble.classList.remove('visible');
         setTimeout(() => speechBubble.classList.add('hidden'), 400);
-    }, 3000);
+    }, 8000);
 }
+
+// Listen for LLM speech from main process
+ipcRenderer.on('show-speech', (event, text) => {
+    showSpeech(text);
+});
 
 // Random speech and animation cycle
 // Random speech cycle removed (handled by LLM)
