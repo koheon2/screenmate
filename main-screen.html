@@ -807,8 +807,9 @@
     <div class="modal-overlay" id="play-modal">
         <div class="modal">
             <h3>놀아주기 선택</h3>
-            <button class="modal-btn" onclick="selectPlayMode('ball')">🏀 공놀이 (30초)</button>
+            <button class="modal-btn" onclick="selectPlayMode('ball')">🏀 공놀이</button>
             <button class="modal-btn" onclick="selectPlayMode('food')">🍖 밥주기</button>
+            <button class="modal-btn" id="pet-game-btn">✋ 쓰다듬기</button>
             <div class="modal-close" id="close-modal">닫기</div>
         </div>
     </div>
@@ -1520,6 +1521,12 @@
         updateStats();
         // Refresh stats periodically
         setInterval(updateStats, 10000);
+
+        // Petting Game Button
+        document.getElementById('pet-game-btn').addEventListener('click', () => {
+            ipcRenderer.send('open-pet-game');
+            document.getElementById('play-modal').style.display = 'none';
+        });
 
     </script>
 </body>
