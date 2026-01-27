@@ -359,8 +359,6 @@ async function refreshAccessToken() {
 // Call LLM API (with optional screenshot)
 async function callLlmApi(characterId, userMessage, context, screenshotBuffer, isRetry = false) {
     try {
-        console.log(`[LLM] Calling API for CharID: ${characterId} (Has Screenshot: ${!!screenshotBuffer})`);
-
         let url = `${API_BASE_URL}/llm/generate`;
         let options = {
             method: 'POST',
@@ -382,8 +380,7 @@ async function callLlmApi(characterId, userMessage, context, screenshotBuffer, i
             options.headers['Content-Type'] = 'application/json';
             options.body = JSON.stringify({
                 characterId,
-                userMessage: userMessage || '',
-                context: context || {}
+                userMessage: userMessage || ''
             });
         }
 
@@ -402,6 +399,15 @@ async function callLlmApi(characterId, userMessage, context, screenshotBuffer, i
         if (!response.ok) {
             const errText = await response.text();
             console.error(`[LLM] API Error ${response.status}:`, errText);
+
+            // Try to parse and display detailed error
+            try {
+                const errorJson = JSON.parse(errText);
+                console.error('[LLM] Detailed Error:', JSON.stringify(errorJson, null, 2));
+            } catch (e) {
+                // Not JSON, already logged as text
+            }
+
             throw new Error(`API Error ${response.status}`);
         }
 
@@ -1527,19 +1533,20 @@ setInterval(async () => {
                     });
 
                     if (sources.length > 0) {
-                        // Use the first screen (primary)
-                        // screenshotBuffer = sources[0].thumbnail.toPNG();
-                        // console.log('Screenshot captured for LLM context');
+                        screenshotBuffer = sources[0].thumbnail.toPNG();
                     }
                 } catch (e) {
                     console.error('Failed to capture screenshot:', e);
                 }
 
-                const llmResponse = await callLlmApi(playerStats.dbCharacterId, '', context, screenshotBuffer);
+                // 전형적인 400 에러를 피하기 위해 가장 강력한 형태의 JSON 지시어와 예시 구조를 보냅니다.
+                const userPrompt = "Respond ONLY with a valid JSON object. No markdown, no pre-text. Structure: {\"message\": \"string\", \"actions\": [], \"qaPatch\": {}, \"emotion\": \"string\"}";
+                const llmResponse = await callLlmApi(playerStats.dbCharacterId, userPrompt, context, screenshotBuffer);
 
-                if (llmResponse && llmResponse.message && characterWindow) {
-                    console.log(`[LLM Speech] ${llmResponse.message}`);
-                    characterWindow.webContents.send('show-speech', llmResponse.message);
+                if (llmResponse && llmResponse.message) {
+                    if (characterWindow && !characterWindow.isDestroyed()) {
+                        characterWindow.webContents.send('show-speech', llmResponse.message);
+                    }
                 }
             } catch (err) {
                 console.error('LLM speech error:', err);
