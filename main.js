@@ -41,6 +41,16 @@ function getKoreanName(englishName) {
     return CHARACTER_NAME_KR[lower] || englishName;
 }
 
+function toRenderableImage(src) {
+    if (!src) return src;
+    if (typeof src === 'string' && src.startsWith('file:')) return src;
+    try {
+        return fs.existsSync(src) ? pathToFileURL(src).toString() : src;
+    } catch (e) {
+        return src;
+    }
+}
+
 // Window references
 let loginWindow = null;
 let mainWindow = null;
@@ -512,6 +522,7 @@ async function syncCharacterToDB() {
             // Use the first alive character
             const aliveChar = existingChars.find(c => c.isAlive) || existingChars[0];
             playerStats.dbCharacterId = aliveChar.id;
+            playerStats.lastSyncedStageIndex = aliveChar.stageIndex ?? aliveChar.stage_index ?? 0;
             console.log('Linked to existing DB character:', aliveChar.id);
         } else {
             // Create new character
@@ -532,13 +543,24 @@ async function syncCharacterToDB() {
 
     // Update character stats in DB
     if (playerStats.dbCharacterId) {
-        await updateCharacterInDB(playerStats.dbCharacterId, {
+        const safeStageIndex = Math.max(
+            playerStats.level || 0,
+            playerStats.lastSyncedStageIndex || 0
+        );
+
+        const updated = await updateCharacterInDB(playerStats.dbCharacterId, {
             happiness: playerStats.happiness,
             health: playerStats.hp,
-            stageIndex: playerStats.level,
+            stageIndex: safeStageIndex,
             lastFedAt: playerStats.lastFedTime ? new Date(playerStats.lastFedTime).toISOString() : null,
             lastPlayedAt: playerStats.lastPlayTime ? new Date(playerStats.lastPlayTime).toISOString() : null
         });
+
+        if (updated && typeof updated.stageIndex === 'number') {
+            playerStats.lastSyncedStageIndex = updated.stageIndex;
+        } else {
+            playerStats.lastSyncedStageIndex = safeStageIndex;
+        }
     }
 }
 
@@ -588,6 +610,10 @@ function createMainWindow() {
     // Send initial state when loaded
     mainWindow.webContents.on('did-finish-load', () => {
         mainWindow.webContents.send('update-ui-state', { isGameRunning });
+        const renderable = toRenderableImage(playerStats?.characterImage);
+        if (renderable) {
+            mainWindow.webContents.send('update-image', renderable);
+        }
     });
 
     mainWindow.on('closed', () => mainWindow = null);
@@ -667,9 +693,12 @@ function createHomeWindow() {
         }
     });
 
+    // Keep home behind the character window
+    homeWindow.setAlwaysOnTop(true, 'floating');
+
     if (process.platform === 'darwin') {
         homeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-        homeWindow.setAlwaysOnTop(true, 'screen-saver');
+        homeWindow.setAlwaysOnTop(true, 'floating');
     }
 
     homeWindow.loadFile('home.html');
@@ -817,7 +846,17 @@ function createCharacterWindow() {
         }
     });
 
+    // Ensure character stays above the home icon
+    characterWindow.setAlwaysOnTop(true, 'screen-saver');
+    characterWindow.moveTop();
+
     characterWindow.loadFile('character.html');
+    characterWindow.webContents.on('did-finish-load', () => {
+        const renderable = toRenderableImage(playerStats.characterImage);
+        if (renderable) {
+            characterWindow.webContents.send('update-image', renderable);
+        }
+    });
 
     // Make window click-through for transparent areas
     characterWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -1280,7 +1319,7 @@ ipcMain.on('destructive-action', (event, type) => {
 // ==================== EVOLUTION SYSTEM ====================
 
 ipcMain.handle('get-current-image', () => {
-    return playerStats.characterImage;
+    return toRenderableImage(playerStats.characterImage);
 });
 
 let clickResetTimer = null;
@@ -1297,8 +1336,9 @@ ipcMain.on('egg-clicked', () => {
     if (playerStats.clickCount === 15) {
         // Crack the egg
         playerStats.characterImage = path.join(__dirname, 'assets/level0/level0_cracked.png');
-        if (characterWindow) characterWindow.webContents.send('update-image', playerStats.characterImage);
-        if (mainWindow) mainWindow.webContents.send('update-image', playerStats.characterImage);
+        const renderable = toRenderableImage(playerStats.characterImage);
+        if (characterWindow) characterWindow.webContents.send('update-image', renderable);
+        if (mainWindow) mainWindow.webContents.send('update-image', renderable);
     } else if (playerStats.clickCount >= 30) {
         // Evolve to Level 1
         evolveCharacter(1);
@@ -1313,8 +1353,9 @@ ipcMain.on('egg-clicked', () => {
             console.log('Click streak broken. Resetting egg.');
             playerStats.clickCount = 0;
             playerStats.characterImage = path.join(__dirname, 'assets/level0/level0.png');
-            if (characterWindow) characterWindow.webContents.send('update-image', playerStats.characterImage);
-            if (mainWindow) mainWindow.webContents.send('update-image', playerStats.characterImage);
+            const renderable = toRenderableImage(playerStats.characterImage);
+            if (characterWindow) characterWindow.webContents.send('update-image', renderable);
+            if (mainWindow) mainWindow.webContents.send('update-image', renderable);
             saveUserData();
         }
     }, 3000); // 3 seconds timeout
@@ -1380,13 +1421,13 @@ function evolveCharacter(targetLevel) {
 
             // Notify Renderer
             if (characterWindow) {
-                characterWindow.webContents.send('update-image', fullPath);
+                characterWindow.webContents.send('update-image', toRenderableImage(fullPath));
                 // characterWindow.webContents.send('show-speech', '진화했다! ✨');
                 // Force redraw if needed
                 characterWindow.setBounds(characterWindow.getBounds());
             }
             if (mainWindow) {
-                mainWindow.webContents.send('update-image', fullPath);
+                mainWindow.webContents.send('update-image', toRenderableImage(fullPath));
             }
 
             saveUserData();
@@ -1408,8 +1449,9 @@ function updateDynamicImage() {
         if (fs.existsSync(sleepPath)) {
             if (playerStats.characterImage !== sleepPath) {
                 playerStats.characterImage = sleepPath;
-                if (characterWindow) characterWindow.webContents.send('update-image', sleepPath);
-                if (mainWindow) mainWindow.webContents.send('update-image', sleepPath);
+                const renderable = toRenderableImage(sleepPath);
+                if (characterWindow) characterWindow.webContents.send('update-image', renderable);
+                if (mainWindow) mainWindow.webContents.send('update-image', renderable);
             }
             return;
         }
@@ -1456,8 +1498,9 @@ function updateDynamicImage() {
         // For simplicity: Update every time this is called (1 min interval).
         playerStats.characterImage = fullPath;
 
-        if (characterWindow) characterWindow.webContents.send('update-image', fullPath);
-        if (mainWindow) mainWindow.webContents.send('update-image', fullPath);
+        const renderable = toRenderableImage(fullPath);
+        if (characterWindow) characterWindow.webContents.send('update-image', renderable);
+        if (mainWindow) mainWindow.webContents.send('update-image', renderable);
     } else {
         // Fallback to normal if specific emotion missing
         const normalPath = path.join(baseDir, 'normal.webp');
