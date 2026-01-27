@@ -15,6 +15,12 @@ const modelFile = params.get('model') || 'house.glb';
 const placeName = params.get('placeName') || '장소';
 const placeId = params.get('placeId') || 'house1';
 const sleepingMode = params.get('sleeping') === '1';
+const hasEgg = params.get('hasEgg') === '1';
+const breedingMode = params.get('breeding') === '1';
+const partnerImgUrl = params.get('partnerImg') || '';
+
+console.log('[HouseViewer] breedingMode:', breedingMode, 'partnerImgUrl:', partnerImgUrl);
+
 const DEBUG_PLACE = true;
 const PLACEMENTS = {
     bed: { x: -0.926, y: 0.6, z: 0.344 },
@@ -312,7 +318,13 @@ if (spriteUrl) {
             const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
             characterSprite = new THREE.Sprite(material);
             characterSprite.scale.set(0.44, 0.44, 1);
-            applyPlacement(currentPlacement);
+
+            if (breedingMode) {
+                // 번식 모드: 왼쪽에 배치
+                characterSprite.position.set(-0.3, 0.3, 0.016);
+            } else {
+                applyPlacement(currentPlacement);
+            }
             scene.add(characterSprite);
         },
         undefined,
@@ -374,11 +386,203 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+function updateBubble(pos) {
+    const bubble = document.getElementById('speech-bubble');
+    if (!bubble || !pos) return;
+    const tempV = pos.clone();
+    tempV.y += 0.5; // 머리 위
+    tempV.project(camera);
+    const x = (tempV.x * .5 + .5) * container.clientWidth;
+    const y = (tempV.y * -.5 + .5) * container.clientHeight;
+    bubble.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+}
+
 function animate() {
     requestAnimationFrame(animate);
     applyTimeOfDayLighting(debugHour);
     controls.update();
+
+    if (characterSprite) {
+        updateBubble(characterSprite.position);
+    }
+
     renderer.render(scene, camera);
+}
+
+// ==================== BREEDING MODE ====================
+let partnerSprite = null;
+let breedingStarted = false;
+
+function tryStartBreeding() {
+    if (breedingStarted) return;
+    if (!characterSprite || !partnerSprite) {
+        // Retry in 500ms if sprites not loaded yet
+        setTimeout(tryStartBreeding, 500);
+        return;
+    }
+    breedingStarted = true;
+
+    // Position sprites for breeding
+    characterSprite.position.set(-0.5, 0.3, 0.016);
+    partnerSprite.position.set(0.5, 0.3, 0.016);
+
+    // Start kiss animation after a short delay
+    setTimeout(startBreedingAnimation, 1000);
+}
+
+if (breedingMode) {
+    // 1. 파트너(마메치) 띄우기
+    const partnerLoader = new THREE.TextureLoader();
+    partnerLoader.load(
+        'assets/level3/mametchi/normal.webp',
+        (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            partnerSprite = new THREE.Sprite(material);
+            partnerSprite.scale.set(0.44, 0.44, 1);
+            partnerSprite.position.set(0.3, 0.3, 0.016); // 오른쪽
+            scene.add(partnerSprite);
+
+            // 내 캐릭터 왼쪽으로 이동
+            if (characterSprite) {
+                characterSprite.position.set(-0.3, 0.3, 0.016);
+            }
+
+            tryStartBreeding();
+        }
+    );
+}
+
+function startBreedingAnimation() {
+    console.log('[Breeding] startBreedingAnimation called');
+    console.log('[Breeding] characterSprite:', !!characterSprite, 'partnerSprite:', !!partnerSprite);
+    if (!characterSprite || !partnerSprite) {
+        console.log('[Breeding] Missing sprites, aborting');
+        return;
+    }
+
+    let step = 0;
+    const interval = setInterval(() => {
+        step++;
+
+        // Move towards each other
+        if (step < 30) {
+            characterSprite.position.x += 0.015;
+            partnerSprite.position.x -= 0.015;
+        }
+
+        // Create heart particles during kissing
+        if (step > 30 && step < 80 && step % 8 === 0) {
+            createHeartParticle();
+        }
+
+        if (step >= 100) {
+            console.log('[Breeding] Animation complete, calling finishBreeding');
+            clearInterval(interval);
+            finishBreeding();
+        }
+    }, 50);
+}
+
+function createHeartParticle() {
+    // Simple heart using DOM overlay
+    const heartEl = document.createElement('div');
+    heartEl.textContent = '❤️';
+    heartEl.style.cssText = `
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        font-size: 32px;
+        transform: translate(-50%, -50%);
+        z-index: 50;
+        pointer-events: none;
+        animation: floatUp 1.5s ease-out forwards;
+    `;
+    document.body.appendChild(heartEl);
+
+    // Add animation if not exists
+    if (!document.getElementById('heart-anim-style')) {
+        const style = document.createElement('style');
+        style.id = 'heart-anim-style';
+        style.textContent = `
+            @keyframes floatUp {
+                0% { opacity: 1; transform: translate(-50%, -50%) translateY(0); }
+                100% { opacity: 0; transform: translate(-50%, -50%) translateY(-80px); }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    setTimeout(() => heartEl.remove(), 1500);
+}
+
+function finishBreeding() {
+    console.log('[Breeding] finishBreeding called');
+    // Hide both sprites
+    if (characterSprite) characterSprite.visible = false;
+    if (partnerSprite) partnerSprite.visible = false;
+    // Show egg
+    const eggEl = document.getElementById('house-egg');
+    if (eggEl) {
+        eggEl.style.display = 'block';
+        eggEl.style.opacity = '1';
+        eggEl.style.pointerEvents = 'auto';
+    }
+
+    // Also add to 3D scene just in case DOM is blocked
+    const eggLoader = new THREE.TextureLoader();
+    eggLoader.load('assets/egg.svg', (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const mat = new THREE.SpriteMaterial({ map: tex });
+        const eggSprite = new THREE.Sprite(mat);
+        eggSprite.scale.set(0.4, 0.5, 1);
+        eggSprite.position.set(0, 0.3, 0.016);
+        scene.add(eggSprite);
+    });
+
+    // Allow clicking on egg to acquire it
+    if (eggEl) {
+        eggEl.style.pointerEvents = 'auto';
+        eggEl.style.cursor = 'pointer';
+        eggEl.onclick = () => {
+            if (ipcRenderer) {
+                ipcRenderer.send('egg-acquired');
+                eggEl.style.display = 'none';
+                // Close viewer after acquiring egg
+                setTimeout(() => {
+                    ipcRenderer.send('close-house-viewer');
+                }, 500);
+            }
+        };
+    }
+}
+
+// Breeding / Egg Logic (for hasEgg state - viewing egg after breeding completed)
+if (hasEgg && !breedingMode) {
+    const eggEl = document.getElementById('house-egg');
+    if (eggEl) {
+        // Show DOM overlay egg
+        eggEl.style.display = 'block';
+    }
+
+    // Trigger dialogue sequence
+    setTimeout(() => {
+        const bubble = document.getElementById('speech-bubble');
+        if (bubble && characterSprite) {
+            bubble.textContent = "집사야 고마웠다~";
+            bubble.style.opacity = 1;
+
+            setTimeout(async () => {
+                if (ipcRenderer) {
+                    const res = await ipcRenderer.invoke('reset-game');
+                    if (res) {
+                        alert('새로운 알이 태어났습니다!');
+                        ipcRenderer.send('close-house-viewer');
+                    }
+                }
+            }, 3000);
+        }
+    }, 1500);
 }
 
 animate();
