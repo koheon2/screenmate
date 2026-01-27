@@ -413,6 +413,16 @@
             background: #f3f3f3;
         }
 
+        .place-row.locked {
+            opacity: 0.6;
+            cursor: default;
+            background: #f0f0f0;
+        }
+
+        .place-row.locked:hover {
+            background: #f0f0f0;
+        }
+
         .place-badge {
             width: 36px;
             height: 36px;
@@ -653,26 +663,28 @@
             }
             places.forEach((place) => {
                 const row = document.createElement('div');
-                row.className = 'place-row';
+                row.className = `place-row${place.unlocked ? '' : ' locked'}`;
                 const badge = document.createElement('div');
                 badge.className = 'place-badge';
-                badge.textContent = place.icon || '●';
+                badge.textContent = place.unlocked ? (place.icon || '●') : '🔒';
                 const meta = document.createElement('div');
                 meta.className = 'place-meta';
                 const name = document.createElement('div');
                 name.className = 'place-name';
-                name.textContent = place.name;
+                name.textContent = place.unlocked ? place.name : '???';
                 const sub = document.createElement('div');
                 sub.className = 'place-sub';
-                sub.textContent = '발견 완료';
+                sub.textContent = place.unlocked ? '발견 완료' : '미발견';
                 meta.appendChild(name);
                 meta.appendChild(sub);
                 row.appendChild(badge);
                 row.appendChild(meta);
-                row.addEventListener('click', () => {
-                    ipcRenderer.send('open-house-viewer', { placeId: place.id, isNew: false });
-                    placesModal.style.display = 'none';
-                });
+                if (place.unlocked) {
+                    row.addEventListener('click', () => {
+                        ipcRenderer.send('open-house-viewer', { placeId: place.id, isNew: false });
+                        placesModal.style.display = 'none';
+                    });
+                }
                 placesList.appendChild(row);
             });
         }
@@ -820,8 +832,8 @@
         });
 
         document.getElementById('places-btn').addEventListener('click', () => {
-            ipcRenderer.invoke('get-player-status').then((stats) => {
-                renderPlacesModal(stats.discoveredPlaces || []);
+            ipcRenderer.invoke('get-places').then((places) => {
+                renderPlacesModal(places || []);
                 placesModal.style.display = 'flex';
             });
         });
