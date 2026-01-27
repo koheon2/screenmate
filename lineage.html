@@ -29,6 +29,7 @@
             border-radius: 10px;
             cursor: pointer;
             font-weight: 700;
+            font-size: 13px;
         }
 
         .btn.secondary {
@@ -107,13 +108,18 @@
             color: #444;
             font-size: 12px;
         }
+
+        .card-footer {
+            margin-top: 10px;
+            display: flex;
+            justify-content: flex-end;
+        }
     </style>
 </head>
 
 <body>
     <div class="topbar">
         <button class="btn secondary" id="back-btn">← 돌아가기</button>
-        <button class="btn" id="refresh-btn">새로고침</button>
         <button class="btn secondary" data-depth="2">깊이 2</button>
         <button class="btn secondary" data-depth="4">깊이 4</button>
         <button class="btn secondary" data-depth="6">깊이 6</button>
@@ -128,6 +134,9 @@
         <div class="title">가계도 트리</div>
         <div class="muted" style="margin-bottom:8px;">왼쪽은 조상, 가운데는 나, 오른쪽은 자손</div>
         <div id="tree"></div>
+        <div class="card-footer">
+            <button class="btn" id="refresh-btn">새로고침</button>
+        </div>
     </div>
 
     <script>

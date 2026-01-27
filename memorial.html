@@ -5,16 +5,17 @@
     <meta charset="UTF-8">
     <title>방치로 희생된 당신의 스크린메이트</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;800&display=swap');
         body {
             margin: 0;
             padding: 0;
-            font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
-            background-color: #f7f7f7;
-            color: #333;
-            width: 350px;
-            height: 550px;
+            font-family: "Noto Sans KR", system-ui, -apple-system, sans-serif;
+            background-color: #fff9f0;
+            color: #1f1f1f;
+            width: 100vw;
+            height: 100vh;
             overflow: hidden;
-            border: 1px solid #ddd;
+            box-sizing: border-box;
             display: flex;
             flex-direction: column;
         }
@@ -27,11 +28,18 @@
             position: relative;
         }
 
+        .topbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 12px 0;
+        }
+
         h1 {
             font-size: 16px;
-            color: #555;
+            color: #1f1f1f;
             margin: 0;
-            font-weight: 700;
+            font-weight: 800;
             line-height: 1.4;
             word-break: keep-all;
         }
@@ -43,16 +51,36 @@
             right: 10px;
             width: 24px;
             height: 24px;
-            border: none;
-            background: transparent;
+            border: 2px solid #1f1f1f;
+            background: #fff;
             cursor: pointer;
             font-size: 18px;
-            color: #999;
+            color: #1f1f1f;
             z-index: 100;
+            border-radius: 8px;
+            box-shadow: 2px 2px 0 #1f1f1f;
         }
 
         .close-btn:hover {
-            color: #333;
+            transform: translate(-1px, -1px);
+        }
+
+        .back-btn {
+            -webkit-app-region: no-drag;
+            border: 2px solid #1f1f1f;
+            background: #ffffff;
+            color: #1f1f1f;
+            padding: 6px 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 13px;
+            box-shadow: 2px 2px 0 #1f1f1f;
+            transition: transform 0.12s ease;
+        }
+
+        .back-btn:hover {
+            transform: translate(-1px, -1px);
         }
 
         .content-scroll {
@@ -68,16 +96,16 @@
         }
 
         .pet-card {
-            background: white;
-            border-radius: 8px;
+            background: #ffffff;
+            border-radius: 12px;
             padding: 12px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            box-shadow: 2px 2px 0 #1f1f1f;
             display: flex;
             flex-direction: column;
             align-items: center;
             position: relative;
             overflow: hidden;
-            border: 1px solid #eee;
+            border: 2px solid #1f1f1f;
         }
 
         .portrait-container {
@@ -175,34 +203,13 @@
             background: #aaa;
         }
 
-        .footer {
-            padding: 15px;
-            background: white;
-            border-top: 1px solid #eee;
-            text-align: center;
-        }
-
-        .back-btn {
-            -webkit-app-region: no-drag;
-            padding: 10px 30px;
-            background: #333;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: background 0.2s;
-            width: 80%;
-        }
-
-        .back-btn:hover {
-            background: #555;
-        }
     </style>
 </head>
 
 <body>
-    <button class="close-btn" id="close-memorial">×</button>
+    <div class="topbar">
+        <button class="back-btn" id="back-to-main">← 돌아가기</button>
+    </div>
     <header>
         <h1>방치로 희생된 당신의 스크린메이트</h1>
     </header>
@@ -211,10 +218,6 @@
         <div class="grid-container" id="history-grid">
             <!-- Cards will be injected here -->
         </div>
-    </div>
-
-    <div class="footer">
-        <button class="back-btn" id="back-to-main">메인 화면으로 돌아가기</button>
     </div>
 
     <script>
@@ -269,10 +272,6 @@
                 });
             });
         }
-
-        document.getElementById('close-memorial').addEventListener('click', () => {
-            ipcRenderer.send('go-to-main');
-        });
 
         document.getElementById('back-to-main').addEventListener('click', () => {
             ipcRenderer.send('go-to-main');

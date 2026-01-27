@@ -9,9 +9,10 @@
             padding: 0;
             width: 100vw;
             height: 100vh;
-            background: transparent;
+            background: #fff9f0;
             overflow: hidden;
             user-select: none;
+            font-family: "Noto Sans KR", system-ui, -apple-system, sans-serif;
         }
 
         #game-area {
@@ -27,8 +28,8 @@
             transform: translate(-50%, -50%);
             font-size: 48px;
             font-weight: bold;
-            color: #333;
-            text-shadow: 2px 2px 0px white;
+            color: #1f1f1f;
+            text-shadow: 2px 2px 0px #fff9f0;
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.5s;
@@ -44,12 +45,14 @@
             top: 20px;
             right: 20px;
             padding: 10px 20px;
-            background: rgba(255, 255, 255, 0.8);
-            border: 1px solid #ccc;
-            border-radius: 8px;
+            background: #ffd166;
+            border: 2px solid #1f1f1f;
+            border-radius: 10px;
             cursor: pointer;
             font-family: inherit;
             z-index: 20;
+            font-weight: 700;
+            box-shadow: 2px 2px 0 #1f1f1f;
         }
 
         #ball {
@@ -81,10 +84,12 @@
             transform: translateX(-50%);
             font-size: 24px;
             font-weight: bold;
-            color: #333;
-            background: rgba(255, 255, 255, 0.7);
+            color: #1f1f1f;
+            background: #ffffff;
             padding: 5px 15px;
-            border-radius: 15px;
+            border-radius: 12px;
+            border: 2px solid #1f1f1f;
+            box-shadow: 2px 2px 0 #1f1f1f;
             display: none;
             z-index: 20;
         }

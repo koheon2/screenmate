@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const canvas = document.getElementById('house-canvas');
@@ -15,13 +16,30 @@ const modelFile = params.get('model') || 'house.glb';
 const placeName = params.get('placeName') || '장소';
 const placeId = params.get('placeId') || 'house1';
 const sleepingMode = params.get('sleeping') === '1';
+const level = Number(params.get('level') || '0');
 const hasEgg = params.get('hasEgg') === '1';
 const breedingStage = params.get('breedingStage') || '';
 const breedingKissing = breedingStage === 'KISSING';
 const breedingEggHome = breedingStage === 'EGG_HOME';
 const breedingCradle = breedingStage === 'CRADLE';
+const debugPlacement = params.get('debugPlacement') === '1';
 const partnerImgUrl = params.get('partnerImg') || '';
 const partnerName = params.get('partnerName') || '';
+const companionImgUrl = params.get('companionImg') || '';
+const companionCoords = {
+    x: params.get('companionX'),
+    y: params.get('companionY'),
+    z: params.get('companionZ')
+};
+const hasCompanionCoords = Object.values(companionCoords).every((v) => v !== null && v !== '');
+const placementOverride = {
+    x: params.get('placementX'),
+    y: params.get('placementY'),
+    z: params.get('placementZ')
+};
+const placementModelY = params.get('placementModelY');
+const hasPlacementOverride = Object.values(placementOverride).every((v) => v !== null && v !== '');
+const hasModelYOverride = placementModelY !== null && placementModelY !== '';
 
 console.log('[HouseViewer] breedingStage:', breedingStage, 'partnerName:', partnerName);
 
@@ -59,6 +77,13 @@ controls.rotateSpeed = 0.6;
 controls.zoomSpeed = 0.8;
 controls.minDistance = 1.2;
 controls.maxDistance = isFull ? 12 : 6;
+
+const transformControls = new TransformControls(camera, renderer.domElement);
+transformControls.setMode('translate');
+transformControls.enabled = false;
+transformControls.visible = false;
+transformControls.setSize(0.7);
+scene.add(transformControls);
 
 // Lighting (time-of-day aware)
 const ambient = new THREE.AmbientLight(0xffffff, 0.7);
@@ -134,7 +159,6 @@ const GROUND_COLORS = {
     house6: 0x2f2f2f,
     park: 0x2e4a2f,
     park2: 0x3b5a36,
-    bakery: 0x4a3a2a,
     pharmacy: 0x24373a,
     school: 0x3a3526,
     police: 0x1f2b3c,
@@ -232,17 +256,34 @@ window.__setDebugHour = (hour) => {
 
 let modelRoot = null;
 let characterSprite = null;
+let companionSprite = null;
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const placementPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.8);
 const placementPoint = new THREE.Vector3();
-let currentPlacement = sleepingMode ? 'bed' : 'floor';
-let sleepInteractionLocked = sleepingMode;
+const eggInteractionMode = breedingCradle || level === 0;
+let currentPlacement = sleepingMode && !eggInteractionMode ? 'bed' : 'floor';
+let sleepInteractionLocked = sleepingMode && !eggInteractionMode;
+let manualPlacement = null;
+let modelYOffset = 0;
+let cameraOnlyMode = false;
+
+if (hasPlacementOverride) {
+    manualPlacement = {
+        x: Number(placementOverride.x),
+        y: Number(placementOverride.y),
+        z: Number(placementOverride.z)
+    };
+}
+if (hasModelYOverride) {
+    modelYOffset = Number(placementModelY);
+}
 
 function applyPlacement(name) {
     const target = PLACEMENTS[name];
     if (!characterSprite || !target) return;
     currentPlacement = name;
+    manualPlacement = null;
     characterSprite.position.set(target.x, target.y, target.z);
     console.log(
         `[HousePlacement] preset=${name} x=${target.x.toFixed(3)} y=${target.y.toFixed(3)} z=${target.z.toFixed(3)}`
@@ -251,6 +292,52 @@ function applyPlacement(name) {
 
 // Expose a tiny debug hook for the renderer HTML.
 window.__setPlacement = applyPlacement;
+window.__getPlacement = () => {
+    if (!characterSprite) return null;
+    return {
+        x: characterSprite.position.x,
+        y: characterSprite.position.y,
+        z: characterSprite.position.z
+    };
+};
+window.__getModelYOffset = () => {
+    if (!modelRoot) return null;
+    return modelRoot.position.y - 0.6;
+};
+
+window.__setModelYOffset = (value) => {
+    if (!modelRoot) return;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return;
+    modelRoot.position.y = 0.6 + num;
+    modelYOffset = num;
+};
+
+window.__setPlacementCoords = (coords) => {
+    if (!characterSprite || !coords) return;
+    const x = Number(coords.x);
+    const y = Number(coords.y);
+    const z = Number(coords.z);
+    if (![x, y, z].every((v) => Number.isFinite(v))) return;
+    characterSprite.position.set(x, y, z);
+    manualPlacement = { x, y, z };
+    if (debugPlacement && transformControls.object !== characterSprite) {
+        transformControls.attach(characterSprite);
+    }
+};
+
+window.__setCameraOnlyMode = (enabled) => {
+    cameraOnlyMode = !!enabled;
+    if (cameraOnlyMode) {
+        transformControls.detach();
+        controls.enabled = true;
+    }
+};
+
+function toggleCameraOnlyMode() {
+    window.__setCameraOnlyMode(!cameraOnlyMode);
+    window.dispatchEvent(new CustomEvent('camera-only-toggle', { detail: { enabled: cameraOnlyMode } }));
+}
 
 const loader = new GLTFLoader();
 const modelUrl = new URL(`assets/models/${modelFile}`, window.location.href).href;
@@ -293,7 +380,7 @@ loader.load(
         const scaledCenter = new THREE.Vector3();
         scaledBox.getCenter(scaledCenter);
         modelRoot.position.sub(scaledCenter);
-        modelRoot.position.y += 0.6;
+        modelRoot.position.y += 0.6 + modelYOffset;
 
         camera.position.set(3.5, 2.2, 3.5);
         controls.target.set(0, 0.8, 0);
@@ -326,8 +413,13 @@ if (spriteUrl) {
             if (breedingKissing) {
                 // 번식 모드: 왼쪽에 배치
                 characterSprite.position.set(-0.3, 0.3, 0.016);
+            } else if (manualPlacement) {
+                characterSprite.position.set(manualPlacement.x, manualPlacement.y, manualPlacement.z);
             } else {
                 applyPlacement(currentPlacement);
+            }
+            if (debugPlacement && transformControls.object !== characterSprite) {
+                transformControls.attach(characterSprite);
             }
             scene.add(characterSprite);
         },
@@ -338,14 +430,44 @@ if (spriteUrl) {
     );
 }
 
+if (companionImgUrl && hasCompanionCoords) {
+    const companionLoader = new THREE.TextureLoader();
+    companionLoader.load(
+        companionImgUrl,
+        (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            companionSprite = new THREE.Sprite(material);
+            companionSprite.scale.set(0.44, 0.44, 1);
+            companionSprite.position.set(
+                Number(companionCoords.x),
+                Number(companionCoords.y),
+                Number(companionCoords.z)
+            );
+            scene.add(companionSprite);
+        },
+        undefined,
+        (err) => {
+            console.warn('Companion sprite load error:', err);
+        }
+    );
+}
+
 function handleDebugPlacement(event) {
-    if (!DEBUG_PLACE || !characterSprite || !event.shiftKey) return;
+    if (!DEBUG_PLACE || !characterSprite) return;
+    if (!debugPlacement && !event.shiftKey) return;
+    if (cameraOnlyMode) return;
     const rect = renderer.domElement.getBoundingClientRect();
     pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(placementPlane, placementPoint)) {
         characterSprite.position.set(placementPoint.x, characterSprite.position.y, placementPoint.z);
+        manualPlacement = {
+            x: characterSprite.position.x,
+            y: characterSprite.position.y,
+            z: characterSprite.position.z
+        };
         console.log(
             `[HousePlacement] x=${placementPoint.x.toFixed(3)} y=${characterSprite.position.y.toFixed(3)} z=${placementPoint.z.toFixed(3)}`
         );
@@ -353,6 +475,39 @@ function handleDebugPlacement(event) {
 }
 
 renderer.domElement.addEventListener('pointerdown', handleDebugPlacement);
+
+if (debugPlacement) {
+    controls.enabled = false;
+    transformControls.enabled = true;
+    transformControls.visible = true;
+    if (characterSprite) {
+        transformControls.attach(characterSprite);
+    }
+    transformControls.addEventListener('dragging-changed', (event) => {
+        controls.enabled = !event.value;
+    });
+
+    window.addEventListener('keydown', (event) => {
+        if (event.key.toLowerCase() === 'm') {
+            if (transformControls.object === characterSprite && modelRoot) {
+                transformControls.detach();
+                transformControls.attach(modelRoot);
+                transformControls.showX = false;
+                transformControls.showZ = false;
+                transformControls.showY = true;
+            } else if (characterSprite) {
+                transformControls.detach();
+                transformControls.attach(characterSprite);
+                transformControls.showX = true;
+                transformControls.showZ = true;
+                transformControls.showY = true;
+            }
+        }
+        if (event.key.toLowerCase() === 'c') {
+            toggleCameraOnlyMode();
+        }
+    });
+}
 
 function handleSleepInteraction(event) {
     if (!sleepInteractionLocked || !characterSprite || !ipcRenderer) return;

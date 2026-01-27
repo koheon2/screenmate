@@ -262,6 +262,90 @@
             animation: pill-shake 420ms ease;
         }
 
+        .placement-save-btn {
+            position: fixed;
+            right: 18px;
+            bottom: 18px;
+            z-index: 60;
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: none;
+            background: rgba(0, 0, 0, 0.65);
+            color: #fff;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            display: none;
+        }
+
+        .placement-save-btn:hover {
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        .placement-panel {
+            position: fixed;
+            right: 18px;
+            bottom: 18px;
+            z-index: 60;
+            display: none;
+            width: 220px;
+            background: rgba(15, 15, 18, 0.85);
+            color: #fff;
+            border-radius: 12px;
+            padding: 12px;
+            backdrop-filter: blur(6px);
+        }
+
+        .placement-title {
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .placement-label {
+            font-size: 11px;
+            opacity: 0.7;
+            display: block;
+            margin: 6px 0 4px;
+        }
+
+        .placement-input,
+        .placement-select {
+            width: 100%;
+            border-radius: 8px;
+            border: none;
+            padding: 6px 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .placement-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+
+        .placement-action {
+            flex: 1;
+            border: none;
+            border-radius: 8px;
+            padding: 6px 8px;
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .placement-action:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .placement-hint {
+            font-size: 10px;
+            opacity: 0.6;
+            margin-top: 4px;
+        }
+
         @keyframes pill-shake {
             0% { transform: translateX(0); }
             20% { transform: translateX(-6px) rotate(-4deg); }
@@ -310,7 +394,7 @@
     </div>
 
     <!-- Egg Overlay for House Viewer -->
-    <img id="house-egg" src="assets/egg.svg" style="
+    <img id="house-egg" src="assets/level0/level0.png" style="
         display: none;
         position: absolute;
         bottom: 20%;
@@ -321,6 +405,27 @@
         pointer-events: none;
     ">
 
+    <div id="placement-panel" class="placement-panel">
+        <div class="placement-title">디버그 배치</div>
+        <label class="placement-label">장소 이름</label>
+        <input id="place-name-input" class="placement-input" placeholder="장소 이름" />
+        <button id="save-place-name" class="placement-action">이름 저장</button>
+        <label class="placement-label">저장된 위치</label>
+        <select id="placement-select" class="placement-select"></select>
+        <div class="placement-row">
+            <input id="placement-label-input" class="placement-input" placeholder="위치 이름" />
+            <button id="new-placement-btn" class="placement-action">새 슬롯</button>
+        </div>
+        <div class="placement-row">
+            <button id="save-placement-btn" class="placement-action">현재 위치 저장</button>
+        </div>
+        <div class="placement-row">
+            <button id="camera-only-btn" class="placement-action">카메라 전용: OFF</button>
+        </div>
+        <div class="placement-hint">카메라 전용 토글: C 키</div>
+        <div class="placement-hint">모델 Y 조절: M 키로 대상 전환</div>
+    </div>
+
     <div class="curtain-overlay no-anim" id="curtain-overlay" aria-hidden="true">
         <div class="curtain-panel curtain-left"></div>
         <div class="curtain-panel curtain-right"></div>
@@ -330,6 +435,14 @@
         console.log('[HouseViewer HTML] Script loaded, URL:', window.location.href);
         const { ipcRenderer } = require('electron');
         const closeBtn = document.getElementById('close-btn');
+        const placementPanel = document.getElementById('placement-panel');
+        const placeNameInput = document.getElementById('place-name-input');
+        const savePlaceNameBtn = document.getElementById('save-place-name');
+        const placementSelect = document.getElementById('placement-select');
+        const placementLabelInput = document.getElementById('placement-label-input');
+        const newPlacementBtn = document.getElementById('new-placement-btn');
+        const savePlacementBtn = document.getElementById('save-placement-btn');
+        const cameraOnlyBtn = document.getElementById('camera-only-btn');
         const doorOverlay = document.getElementById('door-overlay');
         const curtainOverlay = document.getElementById('curtain-overlay');
         const params = new URLSearchParams(window.location.search);
@@ -343,9 +456,119 @@
         const timeVal = document.getElementById('time-val');
         const pharmacyOverlay = document.getElementById('pharmacy-overlay');
         const pharmacyPill = document.getElementById('pharmacy-pill');
+        const debugPlacement = params.get('debugPlacement') === '1';
 
         if (placeId === 'pharmacy') {
             pharmacyOverlay.classList.add('visible');
+        }
+
+        if (debugPlacement && placementPanel) {
+            placementPanel.style.display = 'block';
+            let placements = {};
+            let activePlacementId = '';
+            let cameraOnly = false;
+
+            const refreshPlacementSelect = () => {
+                placementSelect.innerHTML = '';
+                const emptyOpt = document.createElement('option');
+                emptyOpt.value = '';
+                emptyOpt.textContent = '선택 없음';
+                placementSelect.appendChild(emptyOpt);
+                Object.entries(placements).forEach(([id, info]) => {
+                    const opt = document.createElement('option');
+                    opt.value = id;
+                    opt.textContent = info.label || id;
+                    placementSelect.appendChild(opt);
+                });
+                placementSelect.value = activePlacementId || '';
+            };
+
+            const updateCameraOnlyLabel = () => {
+                if (!cameraOnlyBtn) return;
+                cameraOnlyBtn.textContent = `카메라 전용: ${cameraOnly ? 'ON' : 'OFF'}`;
+            };
+
+            window.addEventListener('camera-only-toggle', (event) => {
+                cameraOnly = !!event.detail?.enabled;
+                updateCameraOnlyLabel();
+            });
+
+            ipcRenderer.invoke('get-place-debug-data', { placeId }).then((res) => {
+                if (!res?.success) return;
+                const data = res.data || {};
+                placeNameInput.value = data.customName || '';
+                placements = data.placements || {};
+                activePlacementId = data.activeId || '';
+                refreshPlacementSelect();
+            });
+
+            savePlaceNameBtn.addEventListener('click', async () => {
+                await ipcRenderer.invoke('set-place-name', { placeId, name: placeNameInput.value });
+                savePlaceNameBtn.textContent = '저장됨';
+                setTimeout(() => {
+                    savePlaceNameBtn.textContent = '이름 저장';
+                }, 1000);
+            });
+
+            placementSelect.addEventListener('change', async () => {
+                const id = placementSelect.value;
+                activePlacementId = id;
+                if (!id || !placements[id]) return;
+                await ipcRenderer.invoke('set-active-placement', { placeId, placementId: id });
+                if (typeof window.__setPlacementCoords === 'function') {
+                    window.__setPlacementCoords(placements[id]);
+                }
+                if (typeof window.__setModelYOffset === 'function') {
+                    window.__setModelYOffset(placements[id].modelY || 0);
+                }
+            });
+
+            newPlacementBtn.addEventListener('click', () => {
+                placementSelect.value = '';
+                activePlacementId = '';
+                placementLabelInput.value = '';
+            });
+
+            savePlacementBtn.addEventListener('click', async () => {
+                if (typeof window.__getPlacement !== 'function') return;
+                const coords = window.__getPlacement();
+                if (!coords) return;
+                let modelY = null;
+                if (typeof window.__getModelYOffset === 'function') {
+                    modelY = window.__getModelYOffset();
+                }
+                const res = await ipcRenderer.invoke('save-place-placement', {
+                    placeId,
+                    placementId: activePlacementId || null,
+                    label: placementLabelInput.value,
+                    x: coords.x,
+                    y: coords.y,
+                    z: coords.z,
+                    modelY
+                });
+                if (res?.success) {
+                    const saved = res.data;
+                    activePlacementId = saved?.placementId || activePlacementId;
+                    if (activePlacementId && saved) {
+                        placements[activePlacementId] = { ...saved, label: placementLabelInput.value || saved.label };
+                    }
+                    refreshPlacementSelect();
+                    savePlacementBtn.textContent = '저장됨';
+                    setTimeout(() => {
+                        savePlacementBtn.textContent = '현재 위치 저장';
+                    }, 1000);
+                }
+            });
+
+            cameraOnlyBtn.addEventListener('click', () => {
+                cameraOnly = !cameraOnly;
+                updateCameraOnlyLabel();
+                if (typeof window.__setCameraOnlyMode === 'function') {
+                    window.__setCameraOnlyMode(cameraOnly);
+                }
+            });
+
+            updateCameraOnlyLabel();
         }
 
         function closeViewer() {

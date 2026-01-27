@@ -94,7 +94,6 @@ const PLACES = [
     { id: 'house6', name: '집 6', icon: '🏠', model: 'house6.glb' },
     { id: 'park', name: '공원', icon: '🌿', model: 'park.glb' },
     { id: 'park2', name: '공원 2', icon: '🌿', model: 'park2.glb' },
-    { id: 'bakery', name: '빵집', icon: '🥐', model: 'bakery.glb' },
     { id: 'cafe', name: '카페', icon: '☕', model: 'cafe.glb' },
     { id: 'pharmacy', name: '약국', icon: '💊', model: 'pharmacy.glb' },
     { id: 'bank', name: '은행', icon: '🏦', model: 'bank.glb' },
@@ -191,6 +190,7 @@ const INITIAL_STATS = {
     breedingStage: null,
     breedingPartner: null,
     breedingParentCharacterId: null,
+    breedingEggOrigin: false,
     hasEgg: false,
     sleepModeActive: false,
     wokeUpEarlyDate: null,
@@ -207,6 +207,7 @@ const INITIAL_STATS = {
     achievements: {},
     visibleAccumMillis: 0,
     visibleLastTickAt: 0,
+    placePlacements: {},
     sickModeActive: false,
     sickAnnounced: false,
     sickRecovered: false,
@@ -292,6 +293,66 @@ function addDiscoveredPlace(placeId) {
     const discovered = new Set(playerStats.discoveredPlaces || []);
     discovered.add(placeId);
     playerStats.discoveredPlaces = Array.from(discovered);
+}
+
+function normalizePlacePlacement(placeId) {
+    if (!playerStats) return null;
+    playerStats.placePlacements = playerStats.placePlacements || {};
+    const existing = playerStats.placePlacements[placeId];
+    if (!existing) return null;
+    if (existing.placements) return existing;
+    if (typeof existing.x === 'number') {
+        const normalized = {
+            customName: null,
+            activeId: 'default',
+            placements: {
+                default: {
+                    label: '기본',
+                    x: existing.x,
+                    y: existing.y,
+                    z: existing.z,
+                    modelY: existing.modelY ?? 0
+                }
+            }
+        };
+        playerStats.placePlacements[placeId] = normalized;
+        return normalized;
+    }
+    return existing;
+}
+
+function getActivePlacement(placeId) {
+    const data = normalizePlacePlacement(placeId) || playerStats?.placePlacements?.[placeId];
+    if (!data || !data.placements) return null;
+    const activeId = data.activeId && data.placements[data.activeId] ? data.activeId : Object.keys(data.placements)[0];
+    if (!activeId) return null;
+    data.activeId = activeId;
+    return { id: activeId, ...data.placements[activeId] };
+}
+
+function getPlacementByLabel(placeId, label) {
+    if (!label) return null;
+    const data = normalizePlacePlacement(placeId) || playerStats?.placePlacements?.[placeId];
+    if (!data || !data.placements) return null;
+    const target = label.trim().toLowerCase();
+    const entry = Object.entries(data.placements).find(([, placement]) => {
+        const name = (placement?.label || '').trim().toLowerCase();
+        return name === target;
+    });
+    if (!entry) return null;
+    return { id: entry[0], ...entry[1] };
+}
+
+function resolvePlacementForView(placeId) {
+    if (!placeId) return null;
+    const isHouse = placeId.startsWith('house');
+    if (isHouse) {
+        const hour = new Date().getHours();
+        const label = hour < 6 ? '침대' : '의자';
+        const labeled = getPlacementByLabel(placeId, label);
+        if (labeled) return labeled;
+    }
+    return getActivePlacement(placeId);
 }
 
 async function upsertAchievementInDB(achievementId, label) {
@@ -502,6 +563,22 @@ function loadUserData() {
                 playerStats.feedCount = playerStats.feedCount || 0;
                 playerStats.visibleAccumMillis = playerStats.visibleAccumMillis || 0;
                 playerStats.visibleLastTickAt = playerStats.visibleLastTickAt || 0;
+                playerStats.placePlacements = playerStats.placePlacements || {};
+                Object.keys(playerStats.placePlacements).forEach((placeId) => {
+                    normalizePlacePlacement(placeId);
+                });
+                if (!playerStats.modelYOffsetResetApplied) {
+                    Object.values(playerStats.placePlacements).forEach((placeData) => {
+                        if (!placeData?.placements) return;
+                        Object.values(placeData.placements).forEach((placement) => {
+                            if (placement && typeof placement.modelY === 'number') {
+                                placement.modelY = 0;
+                            }
+                        });
+                    });
+                    playerStats.modelYOffsetResetApplied = true;
+                    saveUserData({ touchLocalUpdatedAt: false });
+                }
                 playerStats.sickModeActive = !!playerStats.sickModeActive;
                 playerStats.sickAnnounced = !!playerStats.sickAnnounced;
                 playerStats.sickRecovered = !!playerStats.sickRecovered;
@@ -518,6 +595,7 @@ function loadUserData() {
                     // Recover from older test data that left breeding state without a partner.
                     playerStats.breedingStage = null;
                 }
+                playerStats.breedingEggOrigin = !!playerStats.breedingEggOrigin;
                 delete playerStats.isBreeding;
 
                 console.log('Loaded user data. Active Pet:', playerStats.characterName, 'History count:', petHistory.length);
@@ -1279,6 +1357,7 @@ async function syncCharacterToDB() {
             happiness: playerStats.happiness,
             health: playerStats.hp,
             stageIndex: safeStageIndex,
+            intimacyScore: playerStats.intimacyScore,
             homePlaceId: assignedHouseId || null,
             lastFedAt: playerStats.lastFedTime ? new Date(playerStats.lastFedTime).toISOString() : null,
             lastPlayedAt: playerStats.lastPlayTime ? new Date(playerStats.lastPlayTime).toISOString() : null
@@ -1340,8 +1419,8 @@ function createLoginWindow() {
 // ==================== MAIN SCREEN WINDOW ====================
 function createMainWindow() {
     mainWindow = new BrowserWindow({
-        width: 350,
-        height: 550,
+        width: 315,
+        height: 640,
         resizable: false,
         frame: false,
         fullscreenable: false, // Prevent Mac fullscreen
@@ -1394,6 +1473,69 @@ ipcMain.handle('get-pet-history', () => {
         ...pet,
         displayName: getKoreanName(pet.characterName)
     }));
+});
+
+ipcMain.handle('debug-adjust-stat', async (event, payload = {}) => {
+    if (!playerStats) return { success: false, message: '캐릭터가 없어.' };
+    const key = payload.key;
+    const delta = Number(payload.delta) || 0;
+    const clamp = (value) => Math.max(0, Math.min(100, value));
+    const beforeLocalUpdatedAt = playerStats.localUpdatedAt;
+
+    switch (key) {
+        case 'intimacyScore': {
+            const current = Number(playerStats.intimacyScore) || 0;
+            playerStats.intimacyScore = clamp(current + delta);
+            break;
+        }
+        case 'happiness': {
+            const current = Number(playerStats.happiness) || 0;
+            playerStats.happiness = clamp(current + delta);
+            break;
+        }
+        case 'hp': {
+            const current = Number(playerStats.hp) || 0;
+            playerStats.hp = clamp(current + delta);
+            break;
+        }
+        case 'evolutionProgress': {
+            const current = Number(playerStats.evolutionProgress) || 0;
+            playerStats.evolutionProgress = clamp(current + delta);
+            maybeEvolveFromProgress();
+            break;
+        }
+        default:
+            return { success: false, message: '알 수 없는 항목이야.' };
+    }
+
+    if (playerStats && typeof playerStats.localUpdatedAt === 'number') {
+        playerStats.localUpdatedAt = Date.now();
+    }
+
+    try {
+        if (key === 'intimacyScore') {
+            const characterId = await getOrSyncCharacterId();
+            if (characterId) {
+                const updated = await updateCharacterInDB(characterId, {
+                    intimacyScore: playerStats.intimacyScore
+                });
+                if (updated && typeof updated.version === 'number') {
+                    playerStats.serverVersion = updated.version;
+                }
+                if (updated?.updatedAt) {
+                    playerStats.serverUpdatedAt = getServerUpdatedAtMillis(updated.updatedAt);
+                }
+            }
+        }
+        await syncCharacterToDB();
+    } catch (err) {
+        if (typeof beforeLocalUpdatedAt === 'number') {
+            playerStats.localUpdatedAt = beforeLocalUpdatedAt;
+        }
+        return { success: false, message: '서버 동기화 실패' };
+    }
+
+    return { success: true };
 });
 
 ipcMain.handle('reset-game', () => {
@@ -1519,7 +1661,13 @@ function resolveBreedingPartnerImageUrl(partner) {
     return pathToFileURL(partnerPath).toString();
 }
 
-async function createHouseWindow(placeId = 'home', isNewPlace = false, breedingStage = null, breedingPartner = null) {
+async function createHouseWindow(
+    placeId = 'home',
+    isNewPlace = false,
+    breedingStage = null,
+    breedingPartner = null,
+    companion = null
+) {
     if (houseWindow) {
         houseWindow.show();
         return;
@@ -1542,8 +1690,12 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false, breedingS
     const targetY = Math.round(workArea.y);
     const screenCaptureUrl = await capturePrimaryScreenDataUrl();
     const place = getPlaceById(placeId);
-    const sleeping = !!playerStats?.sleepModeActive;
+    const placementData = resolvePlacementForView(place.id);
+    const placementName = normalizePlacePlacement(place.id)?.customName;
+    const isNightHours = new Date().getHours() < 6;
+    const sleeping = isNightHours;
     const isBreedingKissing = breedingStage === BREEDING_STAGES.KISSING;
+    const debugPlacement = breedingStage === 'DEBUG';
 
     houseWindow = new BrowserWindow({
         width: startBounds.width,
@@ -1572,9 +1724,32 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false, breedingS
             resolveSpritePathFor(playerStats.characterName, 3, 'kissing.webp') ||
             resolveSpritePathFor(playerStats.characterName, 3, 'normal.webp');
         if (kissingPath) spritePath = kissingPath;
+    } else if (place.id === 'park2') {
+        const happyPath =
+            resolveSpritePathFor(playerStats.characterName, 3, 'happy.webp') ||
+            resolveSpritePathFor(playerStats.characterName, 3, 'normal.webp');
+        if (happyPath) spritePath = happyPath;
+    } else if (sleeping) {
+        const sleepPath =
+            resolveSpritePathFor(playerStats.characterName, playerStats.level || 1, 'sleeping.webp') ||
+            resolveSpritePathFor(playerStats.characterName, playerStats.level || 1, 'normal.webp');
+        if (sleepPath) spritePath = sleepPath;
     }
     const imgUrl = spritePath ? pathToFileURL(spritePath).toString() : '';
     const partnerImgUrl = isBreedingKissing ? resolveBreedingPartnerImageUrl(breedingPartner) : '';
+
+    let companionImgUrl = '';
+    let companionPlacement = null;
+    if (place.id === 'park2' && companion?.name) {
+        const compPath =
+            resolveSpritePathFor(companion.name, 3, 'happy.webp') ||
+            resolveSpritePathFor(companion.name, 3, 'normal.webp');
+        if (compPath) companionImgUrl = pathToFileURL(compPath).toString();
+        companionPlacement = getPlacementByLabel(place.id, '다리2');
+    }
+    const primaryPlacement = place.id === 'park2'
+        ? (getPlacementByLabel(place.id, '다리1') || placementData)
+        : placementData;
 
     houseWindow.loadFile('house-viewer.html', {
         query: {
@@ -1582,16 +1757,26 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false, breedingS
             img: imgUrl,
             screen: screenCaptureUrl,
             placeId: place.id,
-            placeName: place.name,
+            placeName: placementName || place.name,
             model: place.model,
             isNew: isNewPlace ? '1' : '0',
             sleeping: sleeping ? '1' : '0',
+            level: String(playerStats?.level ?? 0),
             hasEgg: (playerStats && playerStats.hasEgg) ? '1' : '0',
             breedingStage: breedingStage || '',
             breeding: isBreedingKissing ? '1' : '0',
             partnerImg: partnerImgUrl,
             partnerName: breedingPartner?.friendName || '',
-            partnerCharacterId: breedingPartner?.friendCharacterId || ''
+            partnerCharacterId: breedingPartner?.friendCharacterId || '',
+            debugPlacement: debugPlacement ? '1' : '0',
+            placementX: primaryPlacement?.x ?? '',
+            placementY: primaryPlacement?.y ?? '',
+            placementZ: primaryPlacement?.z ?? '',
+            placementModelY: primaryPlacement?.modelY ?? '',
+            companionImg: companionImgUrl,
+            companionX: companionPlacement?.x ?? '',
+            companionY: companionPlacement?.y ?? '',
+            companionZ: companionPlacement?.z ?? ''
         }
     });
     houseWindow.on('closed', () => houseWindow = null);
@@ -2095,7 +2280,14 @@ ipcMain.handle('start-peek', () => {
             discoveredPlaces,
             breedingStage: playerStats.breedingStage,
             breedingPartner: playerStats.breedingPartner || null,
-            hasEgg: playerStats.hasEgg
+            hasEgg: playerStats.hasEgg,
+            companion: placeId === 'park2' ? (() => {
+                const friendId = playerStats.forcedAwayMeta?.friendCharacterId;
+                if (!friendId) return null;
+                const friend = (friendsCache || []).find((f) => f.friendCharacterId === friendId);
+                if (!friend) return null;
+                return { name: friend.friendName };
+            })() : null
         };
     }
 
@@ -2106,6 +2298,9 @@ ipcMain.handle('start-peek', () => {
     let place;
     if (playerStats.level === 0) {
         place = getPlaceById('cradle');
+        if (!isBreedingActive()) {
+            markAchievement('lullaby-baby', '자장자장 우리아가');
+        }
     } else if (playerStats.sickModeActive) {
         ensureSickForcedAway();
         place = getPlaceById('pharmacy');
@@ -2151,15 +2346,30 @@ ipcMain.on('open-house-viewer', (event, payload = {}) => {
         characterState.isReturningHome = true;
         closeChatWindow();
     }
+    recomputeSleepMode(new Date());
     const placeId = payload.placeId || 'home';
     const isNewPlace = !!payload.isNew;
-    const breedingStage = payload.breedingStage || (isBreedingActive() ? playerStats.breedingStage : null);
+    const breedingStage = payload.debugPlacement
+        ? 'DEBUG'
+        : (payload.breedingStage || (isBreedingActive() ? playerStats.breedingStage : null));
     const breedingPartner = payload.breedingPartner || playerStats?.breedingPartner || null;
-    createHouseWindow(placeId, isNewPlace, breedingStage, breedingPartner);
+    const companion = payload.companion || null;
+    createHouseWindow(placeId, isNewPlace, breedingStage, breedingPartner, companion);
 });
 
 ipcMain.on('close-house-viewer', () => {
     if (houseWindow) houseWindow.close();
+});
+
+ipcMain.handle('get-all-places', () => {
+    const data = PLACES.map((place) => {
+        const normalized = normalizePlacePlacement(place.id);
+        return {
+            ...place,
+            name: normalized?.customName || place.name
+        };
+    });
+    return { success: true, data };
 });
 
 ipcMain.handle('capture-primary-screen', async () => {
@@ -2453,11 +2663,9 @@ function evolveCharacter(targetLevel) {
 
             playerStats.evolutionHistory.push({ level: targetLevel, name: randomCharName, date: Date.now() });
 
-            if (targetLevel === 1 && playerStats.breedingStage === BREEDING_STAGES.CRADLE) {
+            if (targetLevel === 1 && playerStats.breedingEggOrigin) {
                 markAchievement('origin-village', '태초마을');
-                playerStats.breedingStage = null;
-                playerStats.breedingPartner = null;
-                playerStats.breedingParentCharacterId = null;
+                playerStats.breedingEggOrigin = false;
                 playerStats.hasEgg = false;
                 clearForcedAway();
                 friendsCache = [];
@@ -2494,6 +2702,13 @@ function evolveCharacter(targetLevel) {
             }
         });
     });
+}
+
+function maybeEvolveFromProgress() {
+    if (!playerStats) return;
+    if (playerStats.level > 0 && playerStats.level < 3 && playerStats.hp > 0 && playerStats.evolutionProgress >= 100) {
+        evolveCharacter(playerStats.level + 1);
+    }
 }
 
 // Check evolution progress periodically (Level 1+)
@@ -2636,7 +2851,7 @@ function hideCharacterImage() {
 }
 
 function showEggInUi() {
-    const eggPath = path.join(__dirname, 'assets/egg.svg');
+    const eggPath = path.join(__dirname, 'assets/level0/level0.png');
     playerStats.characterImage = eggPath;
     const renderable = toRenderableImage(eggPath);
     if (characterWindow && !characterWindow.isDestroyed()) {
@@ -2802,13 +3017,13 @@ setInterval(() => {
         const multiplier = (playerStats.happiness > 60) ? 2 : 1;
         const growth = baseRate * multiplier;
 
-        playerStats.evolutionProgress = Math.min(100, (playerStats.evolutionProgress || 0) + growth);
+        const before = playerStats.evolutionProgress || 0;
+        playerStats.evolutionProgress = Math.min(100, before + growth);
 
         // console.log(`[Evolution] Level ${playerStats.level} Progress: ${playerStats.evolutionProgress.toFixed(4)}% (+${growth.toFixed(5)})`);
 
-
-        if (playerStats.evolutionProgress >= 100) {
-            evolveCharacter(playerStats.level + 1);
+        if (playerStats.evolutionProgress !== before) {
+            maybeEvolveFromProgress();
         }
     }
 
@@ -3346,7 +3561,10 @@ ipcMain.on('breeding-egg-acquired', async () => {
     playerStats.park2UsedFriendIds = preservedPark2;
 
     playerStats.hasEgg = true;
-    playerStats.breedingStage = BREEDING_STAGES.CRADLE;
+    playerStats.breedingStage = null;
+    playerStats.breedingPartner = null;
+    playerStats.breedingParentCharacterId = null;
+    playerStats.breedingEggOrigin = true;
     showEggInUi();
 
     if (parentACharacterId && parentBCharacterId) {
@@ -3366,6 +3584,73 @@ ipcMain.on('breeding-egg-acquired', async () => {
     saveUserData({ touchLocalUpdatedAt: false });
 
     if (homeWindow) homeWindow.webContents.send('home-speech', '...');
+});
+
+ipcMain.handle('save-place-placement', (event, payload) => {
+    if (!playerStats || !payload?.placeId) return { success: false, message: 'Invalid payload' };
+    const { placeId, x, y, z, modelY, placementId, label } = payload;
+    if (![x, y, z].every((v) => typeof v === 'number' && Number.isFinite(v))) {
+        return { success: false, message: 'Invalid coordinates' };
+    }
+    playerStats.placePlacements = playerStats.placePlacements || {};
+    const placeData = normalizePlacePlacement(placeId) || {
+        customName: null,
+        activeId: null,
+        placements: {}
+    };
+    const id = placementId || `slot-${Date.now()}`;
+    placeData.placements[id] = {
+        label: label || placeData.placements[id]?.label || '저장 위치',
+        x,
+        y,
+        z,
+        modelY: (typeof modelY === 'number' && Number.isFinite(modelY)) ? modelY : (placeData.placements[id]?.modelY ?? 0)
+    };
+    placeData.activeId = id;
+    playerStats.placePlacements[placeId] = placeData;
+    saveUserData({ touchLocalUpdatedAt: false });
+    return { success: true, data: { placementId: id, ...placeData.placements[id] } };
+});
+
+ipcMain.handle('get-place-debug-data', (event, { placeId } = {}) => {
+    if (!placeId) return { success: false, message: 'Invalid place' };
+    const place = getPlaceById(placeId);
+    const normalized = normalizePlacePlacement(placeId) || { customName: null, activeId: null, placements: {} };
+    return {
+        success: true,
+        data: {
+            placeId,
+            name: normalized.customName || place.name,
+            customName: normalized.customName || '',
+            activeId: normalized.activeId || null,
+            placements: normalized.placements || {}
+        }
+    };
+});
+
+ipcMain.handle('set-place-name', (event, { placeId, name } = {}) => {
+    if (!placeId) return { success: false, message: 'Invalid place' };
+    const placeData = normalizePlacePlacement(placeId) || {
+        customName: null,
+        activeId: null,
+        placements: {}
+    };
+    placeData.customName = (name || '').trim() || null;
+    playerStats.placePlacements[placeId] = placeData;
+    saveUserData({ touchLocalUpdatedAt: false });
+    return { success: true };
+});
+
+ipcMain.handle('set-active-placement', (event, { placeId, placementId } = {}) => {
+    if (!placeId || !placementId) return { success: false, message: 'Invalid placement' };
+    const placeData = normalizePlacePlacement(placeId);
+    if (!placeData || !placeData.placements?.[placementId]) {
+        return { success: false, message: 'Placement not found' };
+    }
+    placeData.activeId = placementId;
+    playerStats.placePlacements[placeId] = placeData;
+    saveUserData({ touchLocalUpdatedAt: false });
+    return { success: true };
 });
 
 // Back-compat with older house viewer builds.
@@ -3393,16 +3678,16 @@ ipcMain.on('food-eaten', () => {
 
 function createPlayWindow(mode) {
     const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.bounds;
+    const { width, height, x, y } = primaryDisplay.workArea;
 
     playWindow = new BrowserWindow({
-        width: width,
-        height: height,
-        x: 0,
-        y: 0,
+        width,
+        height,
+        x,
+        y,
         transparent: true,
         frame: false,
-        fullscreen: true,
+        fullscreen: false,
         alwaysOnTop: true,
         skipTaskbar: true,
         webPreferences: {
@@ -3410,6 +3695,10 @@ function createPlayWindow(mode) {
             contextIsolation: false,
         },
     });
+    if (process.platform === 'darwin') {
+        playWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        playWindow.setAlwaysOnTop(true, 'screen-saver');
+    }
 
     playWindow.loadFile('play-overlay.html');
     playWindow.webContents.on('did-finish-load', () => {

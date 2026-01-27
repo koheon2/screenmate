@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CynicalFloater - 로그인</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;800&display=swap');
         * {
             margin: 0;
             padding: 0;
@@ -13,8 +14,8 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #ffffff;
+            font-family: "Noto Sans KR", system-ui, -apple-system, sans-serif;
+            background: #fff9f0;
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -30,14 +31,14 @@
 
         h1 {
             font-size: 24px;
-            color: #333;
+            color: #1f1f1f;
             margin-bottom: 8px;
-            font-weight: 600;
+            font-weight: 800;
         }
 
         .subtitle {
             font-size: 14px;
-            color: #888;
+            color: #555;
             margin-bottom: 40px;
         }
 
@@ -47,19 +48,19 @@
             align-items: center;
             gap: 12px;
             padding: 12px 24px;
-            background: #fff;
-            border: 1px solid #ddd;
-            border-radius: 8px;
+            background: #ffd166;
+            border: 2px solid #1f1f1f;
+            border-radius: 12px;
             cursor: pointer;
             font-size: 14px;
-            color: #333;
-            transition: all 0.2s ease;
+            color: #1f1f1f;
+            font-weight: 800;
+            transition: transform 0.12s ease;
+            box-shadow: 2px 2px 0 #1f1f1f;
         }
 
         .google-btn:hover {
-            background: #f8f8f8;
-            border-color: #ccc;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transform: translate(-1px, -1px);
         }
 
         .google-btn img {
@@ -74,16 +75,18 @@
             right: 12px;
             width: 24px;
             height: 24px;
-            border: none;
-            background: transparent;
+            border: 2px solid #1f1f1f;
+            background: #ffffff;
             cursor: pointer;
             font-size: 18px;
-            color: #999;
+            color: #1f1f1f;
+            border-radius: 8px;
+            box-shadow: 2px 2px 0 #1f1f1f;
             transition: color 0.2s;
         }
 
         .close-btn:hover {
-            color: #333;
+            transform: translate(-1px, -1px);
         }
     </style>
 </head>

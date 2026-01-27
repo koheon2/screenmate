@@ -6,21 +6,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CynicalFloater - 메인</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;800&display=swap');
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
 
+        :root {
+            --ink: #1f1f1f;
+            --paper: #fff9f0;
+            --card: #ffffff;
+            --accent: #ffd166;
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #ffffff;
+            font-family: "Noto Sans KR", system-ui, -apple-system, sans-serif;
+            background: var(--paper);
+            color: var(--ink);
             height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             -webkit-app-region: no-drag;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(circle at 20% 20%, rgba(255, 209, 102, 0.18), transparent 45%),
+                radial-gradient(circle at 80% 10%, rgba(255, 165, 77, 0.15), transparent 40%),
+                radial-gradient(circle at 50% 80%, rgba(255, 246, 214, 0.9), transparent 45%);
+            z-index: -1;
         }
 
         .drag-region {
@@ -36,24 +55,35 @@
 
         .container {
             text-align: center;
-            padding: 20px;
-            padding-top: 50px;
+            padding: 22px 22px 30px;
+            padding-top: 54px;
+            margin-top: 25px;
+            background: var(--card);
+            border: 2px solid var(--ink);
+            border-radius: 16px;
+            box-shadow: 4px 4px 0 var(--ink);
+            width: 280px;
         }
 
         .user-info {
-            font-size: 14px;
-            color: #666;
-            margin-bottom: 20px;
+            font-size: 13px;
+            color: #5a4a2e;
+            margin-bottom: 16px;
+            font-weight: 600;
         }
 
         .character-preview {
             width: 120px;
             height: 120px;
-            margin: 0 auto 20px;
+            margin: 0 auto 14px;
             display: flex;
             align-items: center;
             justify-content: center;
             position: relative;
+            border-radius: 12px;
+            border: none;
+            background: transparent;
+            box-shadow: none;
         }
 
         .character-preview img {
@@ -67,17 +97,17 @@
             -webkit-app-region: no-drag;
             position: absolute;
             top: -6px;
-            right: -6px;
+            right: -25px;
             width: 32px;
             height: 32px;
             border-radius: 999px;
-            border: none;
+            border: 2px solid var(--ink);
             cursor: pointer;
-            background: #111;
-            color: #fff;
+            background: var(--accent);
+            color: var(--ink);
             font-size: 16px;
             font-weight: 700;
-            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.22);
+            box-shadow: 2px 2px 0 var(--ink);
         }
 
         @keyframes sway {
@@ -125,8 +155,8 @@
 
         .character-name {
             font-size: 18px;
-            font-weight: 600;
-            color: #333;
+            font-weight: 800;
+            color: var(--ink);
             margin-bottom: 4px;
         }
 
@@ -134,28 +164,28 @@
             font-size: 12px;
             font-weight: 700;
             color: #6a4c00;
-            margin-bottom: 12px;
+            margin-bottom: 14px;
         }
 
         .start-btn {
             -webkit-app-region: no-drag;
-            padding: 12px 40px;
-            background: #333;
-            color: #fff;
-            border: none;
-            border-radius: 8px;
+            padding: 10px 22px;
+            background: var(--accent);
+            color: var(--ink);
+            border: 2px solid var(--ink);
+            border-radius: 999px;
             font-size: 14px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: transform 0.12s ease;
             width: 100%;
             max-width: 200px;
             margin-bottom: 15px;
+            font-weight: 800;
+            box-shadow: 2px 2px 0 var(--ink);
         }
 
         .start-btn:hover {
-            background: #555;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translate(-1px, -1px);
         }
 
         .close-btn {
@@ -165,58 +195,123 @@
             right: 12px;
             width: 24px;
             height: 24px;
-            border: none;
-            background: transparent;
+            border: 2px solid var(--ink);
+            background: #fff;
             cursor: pointer;
             font-size: 18px;
-            color: #999;
-            transition: color 0.2s;
+            color: var(--ink);
+            border-radius: 8px;
+            box-shadow: 2px 2px 0 var(--ink);
+            transition: transform 0.12s ease;
         }
 
         .close-btn:hover {
-            color: #333;
+            transform: translate(-1px, -1px);
         }
 
         .logout-btn {
             -webkit-app-region: no-drag;
-            position: absolute;
-            top: 12px;
-            left: 12px;
-            border: none;
-            background: transparent;
+            border: 2px solid var(--ink);
+            background: #fff;
             cursor: pointer;
             font-size: 12px;
-            color: #333;
-            font-weight: 600;
-            transition: color 0.2s;
+            color: var(--ink);
+            font-weight: 700;
+            transition: transform 0.12s ease;
+            border-radius: 10px;
+            padding: 4px 8px;
+            box-shadow: 2px 2px 0 var(--ink);
         }
 
         .logout-btn:hover {
-            color: #333;
+            transform: translate(-1px, -1px);
+        }
+
+        .top-actions {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 6px;
+            z-index: 2;
+        }
+
+        .debug-toggle {
+            position: absolute;
+            top: 10px;
+            right: 46px;
+            z-index: 2;
+        }
+
+        .debug-panel {
+            position: absolute;
+            top: 44px;
+            right: 10px;
+            background: #ffffff;
+            border: 2px solid #1f1f1f;
+            border-radius: 12px;
+            box-shadow: 3px 3px 0 #1f1f1f;
+            padding: 10px;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 2;
+            width: 200px;
+        }
+
+        .debug-row {
+            display: grid;
+            grid-template-columns: 1fr auto auto auto;
+            gap: 6px;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 700;
+            color: #222;
+        }
+
+        .debug-value {
+            min-width: 38px;
+            text-align: center;
+            font-weight: 800;
+            color: #111;
+        }
+
+        .debug-btn {
+            border: 2px solid #1f1f1f;
+            background: #ffd166;
+            color: #1f1f1f;
+            border-radius: 8px;
+            padding: 2px 6px;
+            cursor: pointer;
+            font-weight: 800;
+            font-size: 12px;
+            line-height: 1;
         }
 
         /* Happiness Bar */
         .happiness-container {
             width: 100%;
             max-width: 200px;
-            margin: 0 auto 10px;
+            margin: 0 auto 12px;
             text-align: left;
         }
 
         .happiness-label {
             font-size: 12px;
-            color: #666;
+            color: #5a4a2e;
             margin-bottom: 5px;
             display: flex;
             justify-content: space-between;
+            font-weight: 700;
         }
 
         .progress-bg {
             width: 100%;
             height: 10px;
-            background: #eee;
+            background: #fff3dc;
             border-radius: 10px;
             overflow: hidden;
+            border: 2px solid var(--ink);
         }
 
         .progress-fill {
@@ -240,35 +335,30 @@
             transition: width 0.5s ease;
         }
 
-        .progress-fill-intimacy {
-            height: 100%;
-            background: linear-gradient(90deg, #ffd166 0%, #f4a261 100%);
-            width: 0%;
-            transition: width 0.5s ease;
-        }
 
         /* Play Button */
         .play-btn {
             -webkit-app-region: no-drag;
             padding: 10px 20px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 8px;
+            background: var(--accent);
+            color: var(--ink);
+            border: 2px solid var(--ink);
+            border-radius: 12px;
             font-size: 14px;
             cursor: pointer;
             width: 100%;
             max-width: 200px;
-            transition: all 0.2s;
+            transition: transform 0.12s ease;
+            font-weight: 800;
+            box-shadow: 2px 2px 0 var(--ink);
         }
 
         .play-btn:hover {
-            background: #0056b3;
-            transform: translateY(-2px);
+            transform: translate(-1px, -1px);
         }
 
         .play-btn:disabled {
-            background: #ccc;
+            background: #e8e0d6;
             cursor: not-allowed;
             transform: none;
         }
@@ -342,7 +432,8 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
+            background: rgba(255, 249, 240, 0.7);
+            backdrop-filter: blur(4px);
             z-index: 100;
             justify-content: center;
             align-items: center;
@@ -351,19 +442,21 @@
 
         .modal {
             -webkit-app-region: no-drag;
-            background: white;
+            background: var(--card);
             padding: 20px;
-            border-radius: 15px;
+            border-radius: 12px;
             width: 80%;
-            max-width: 250px;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+            max-width: 260px;
+            border: 2px solid var(--ink);
+            box-shadow: 3px 3px 0 var(--ink);
             text-align: center;
         }
 
         .modal h3 {
             margin-bottom: 15px;
             font-size: 16px;
-            color: #333;
+            color: var(--ink);
+            font-weight: 800;
         }
 
         .modal-btn {
@@ -372,24 +465,32 @@
             width: 100%;
             padding: 10px;
             margin-bottom: 10px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            background: white;
+            border: 2px solid var(--ink);
+            border-radius: 10px;
+            background: var(--accent);
+            color: var(--ink);
             cursor: pointer;
-            transition: background 0.2s;
+            font-weight: 700;
+            box-shadow: 2px 2px 0 var(--ink);
+            transition: transform 0.12s ease;
         }
 
         .modal-btn:hover {
-            background: #f5f5f5;
+            transform: translate(-1px, -1px);
         }
 
         .modal-close {
             -webkit-app-region: no-drag;
-            margin-top: 10px;
-            color: #888;
+            margin-top: 12px;
+            color: var(--ink);
             font-size: 12px;
             cursor: pointer;
-            text-decoration: underline;
+            border: 2px solid var(--ink);
+            border-radius: 10px;
+            padding: 6px 10px;
+            background: #fff;
+            display: inline-block;
+            box-shadow: 2px 2px 0 var(--ink);
         }
 
         .achievements-modal {
@@ -749,14 +850,25 @@
             opacity: 1;
             transform: translateX(-50%) translateY(0);
         }
+
+        .alert-message {
+            font-size: 12px;
+            color: #333;
+            margin-bottom: 10px;
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }
     </style>
 </head>
 
 <body>
     <div class="drag-region"></div>
-    <button class="logout-btn" id="logout-btn">로그아웃</button>
-    <button class="logout-btn" id="memorial-btn" style="left: 90px; background: transparent;">🪦 납골당</button>
-    <button class="logout-btn" id="lineage-btn" style="left: 200px; background: transparent;">🌳 가계도</button>
+    <div class="top-actions">
+        <button class="logout-btn" id="logout-btn">로그아웃</button>
+        <button class="logout-btn" id="memorial-btn">🪦 납골당</button>
+        <button class="logout-btn" id="lineage-btn">🌳 가계도</button>
+    </div>
+    <button class="logout-btn debug-toggle" id="debug-toggle">디버그</button>
     <button class="close-btn" id="close-btn">×</button>
     <div class="discovered-column" id="discovered-column"></div>
     <div class="place-toast" id="place-toast"></div>
@@ -783,16 +895,6 @@
             </div>
         </div>
 
-        <div class="happiness-container">
-            <div class="happiness-label">
-                <span>친밀도</span>
-                <span id="intimacy-val">0.0/100</span>
-            </div>
-            <div class="progress-bg">
-                <div class="progress-fill-intimacy" id="intimacy-bar" style="width: 0%;"></div>
-            </div>
-        </div>
-
         <!-- HP Bar -->
         <div class="happiness-container">
             <div class="happiness-label">
@@ -815,10 +917,9 @@
             </div>
         </div>
 
-        <button class="start-btn" id="reset-btn" style="display: none; background: #333; margin-bottom: 10px;">새로운 펫
-            입양하기</button>
+        <button class="start-btn" id="reset-btn" style="display: none; margin-bottom: 10px;">새로운 펫 입양하기</button>
         <button class="start-btn" id="start-btn">Start</button>
-        <button class="play-btn" id="menu-btn" style="margin-top: 5px; background: #007bff;">메뉴</button>
+        <button class="play-btn" id="menu-btn" style="margin-top: 5px;">메뉴</button>
 
         <div class="toggle-container">
             <span class="toggle-label">집중 모드</span>
@@ -826,6 +927,33 @@
                 <input type="checkbox" id="focus-mode-toggle">
                 <span class="slider"></span>
             </label>
+        </div>
+    </div>
+
+    <div class="debug-panel" id="debug-panel">
+        <div class="debug-row" data-key="intimacyScore">
+            <span>친밀도</span>
+            <button class="debug-btn" data-delta="-10">◀</button>
+            <span class="debug-value" id="debug-intimacy">0</span>
+            <button class="debug-btn" data-delta="10">▶</button>
+        </div>
+        <div class="debug-row" data-key="happiness">
+            <span>행복도</span>
+            <button class="debug-btn" data-delta="-10">◀</button>
+            <span class="debug-value" id="debug-happiness">0</span>
+            <button class="debug-btn" data-delta="10">▶</button>
+        </div>
+        <div class="debug-row" data-key="hp">
+            <span>건강</span>
+            <button class="debug-btn" data-delta="-10">◀</button>
+            <span class="debug-value" id="debug-hp">0</span>
+            <button class="debug-btn" data-delta="10">▶</button>
+        </div>
+        <div class="debug-row" data-key="evolutionProgress">
+            <span>진화</span>
+            <button class="debug-btn" data-delta="-10">◀</button>
+            <span class="debug-value" id="debug-evo">0</span>
+            <button class="debug-btn" data-delta="10">▶</button>
         </div>
     </div>
 
@@ -895,16 +1023,32 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="place-debug-modal">
+        <div class="modal places-modal">
+            <h3>장소 디버그</h3>
+            <div id="place-debug-list" class="places-list"></div>
+            <div class="modal-close" id="close-place-debug">닫기</div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="alert-modal">
+        <div class="modal">
+            <h3>알림</h3>
+            <div class="alert-message" id="alert-message"></div>
+            <div class="modal-close" id="close-alert">닫기</div>
+        </div>
+    </div>
+
     <!-- Menu Modal -->
     <div class="modal-overlay" id="menu-modal">
         <div class="modal">
             <h3>메뉴</h3>
-            <button class="modal-btn" id="play-btn-menu" style="background: #007bff; color: white;">🎮 놀아주기</button>
-            <button class="modal-btn" id="house-btn-menu" style="background: #007bff; color: white;">🏠 엿보기</button>
-            <button class="modal-btn" id="friends-btn-menu" style="background: #007bff; color: white;">👥 친구</button>
-            <button class="modal-btn" id="places-btn-menu" style="background: #007bff; color: white;">🗺️ 장소</button>
-            <button class="modal-btn" id="achievements-btn-menu" style="background: #007bff; color: white;">🏆
-                업적</button>
+            <button class="modal-btn" id="play-btn-menu">🎮 놀아주기</button>
+            <button class="modal-btn" id="house-btn-menu">🏠 엿보기</button>
+            <button class="modal-btn" id="friends-btn-menu">👥 친구</button>
+            <button class="modal-btn" id="places-btn-menu">🗺️ 장소</button>
+            <button class="modal-btn" id="achievements-btn-menu">🏆 업적</button>
+            <button class="modal-btn" id="place-debug-btn">🧭 장소 디버그</button>
             <div class="modal-close" id="close-menu">닫기</div>
         </div>
     </div>
@@ -919,8 +1063,23 @@
         const placesList = document.getElementById('places-list');
         const friendsModal = document.getElementById('friends-modal');
         const characterInfoModal = document.getElementById('character-info-modal');
+        const placeDebugModal = document.getElementById('place-debug-modal');
+        const alertModal = document.getElementById('alert-modal');
+        const alertMessage = document.getElementById('alert-message');
+        const closeAlert = document.getElementById('close-alert');
+        const debugToggle = document.getElementById('debug-toggle');
+        const debugPanel = document.getElementById('debug-panel');
 
         let achievementsCache = [];
+
+        function showAlert(message) {
+            alertMessage.textContent = message || '';
+            alertModal.style.display = 'flex';
+        }
+
+        closeAlert.addEventListener('click', () => {
+            alertModal.style.display = 'none';
+        });
 
         function setFriendsTab(tab) {
             document.querySelectorAll('.friends-tab').forEach((btn) => {
@@ -1008,7 +1167,7 @@
                                         emoteId: emote || null
                                     });
                                     if (!res.success) {
-                                        alert(res.message || '메시지 전송 실패');
+                                        showAlert(res.message || '메시지 전송 실패');
                                     } else {
                                         const history = await ipcRenderer.invoke('friend-get-messages', {
                                             friendCharacterId: f.friendCharacterId,
@@ -1021,7 +1180,7 @@
                                                     .filter(Boolean).join(' ');
                                                 return `${who}: ${body}`;
                                             });
-                                            alert(lines.join('\n') || '메시지가 없어.');
+                                            showAlert(lines.join('\n') || '메시지가 없어.');
                                         }
                                         loadFriendsData();
                                     }
@@ -1036,7 +1195,7 @@
                                         limit: 30
                                     });
                                     if (!history.success) {
-                                        alert(history.message || '조회 실패');
+                                        showAlert(history.message || '조회 실패');
                                         return;
                                     }
                                     const lines = (history.data || []).map((m) => {
@@ -1045,7 +1204,7 @@
                                             .filter(Boolean).join(' ');
                                         return `${who}: ${body}`;
                                     });
-                                    alert(lines.join('\n') || '메시지가 없어.');
+                                    showAlert(lines.join('\n') || '메시지가 없어.');
                                 }
                             }
                         ]
@@ -1074,7 +1233,7 @@
                                 label: '수락',
                                 onClick: async () => {
                                     const res = await ipcRenderer.invoke('friend-accept', { requestId: r.id });
-                                    if (!res.success) alert(res.message || '수락 실패');
+                                    if (!res.success) showAlert(res.message || '수락 실패');
                                     loadFriendsData();
                                 }
                             },
@@ -1083,7 +1242,7 @@
                                 secondary: true,
                                 onClick: async () => {
                                     const res = await ipcRenderer.invoke('friend-reject', { requestId: r.id });
-                                    if (!res.success) alert(res.message || '거절 실패');
+                                    if (!res.success) showAlert(res.message || '거절 실패');
                                     loadFriendsData();
                                 }
                             }
@@ -1128,9 +1287,9 @@
                                     message
                                 });
                                 if (!sendRes.success) {
-                                    alert(sendRes.message || '요청 실패');
+                                    showAlert(sendRes.message || '요청 실패');
                                 } else {
-                                    alert('친구 요청을 보냈어!');
+                                    showAlert('친구 요청을 보냈어!');
                                 }
                             }
                         }
@@ -1243,7 +1402,7 @@
         async function openCharacterInfo() {
             const res = await ipcRenderer.invoke('character-get-info');
             if (!res.success) {
-                alert(res.message || '캐릭터 정보를 불러오지 못했어.');
+                showAlert(res.message || '캐릭터 정보를 불러오지 못했어.');
                 return;
             }
             renderCharacterInfo(res.data.character, res.data.events || []);
@@ -1303,13 +1462,55 @@
             });
         }
 
+        function showToast(message) {
+            const toast = document.getElementById('place-toast');
+            if (!toast) return;
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 1400);
+        }
+
+        function renderPlaceDebugList(places = []) {
+            const list = document.getElementById('place-debug-list');
+            if (!list) return;
+            list.innerHTML = '';
+            places.forEach((place) => {
+                const row = document.createElement('div');
+                row.className = 'place-row';
+                const badge = document.createElement('div');
+                badge.className = 'place-badge';
+                badge.textContent = place.icon || '●';
+                const meta = document.createElement('div');
+                meta.className = 'place-meta';
+                const name = document.createElement('div');
+                name.className = 'place-name';
+                name.textContent = place.name || place.id;
+                const sub = document.createElement('div');
+                sub.className = 'place-sub';
+                sub.textContent = place.id;
+                meta.appendChild(name);
+                meta.appendChild(sub);
+                row.appendChild(badge);
+                row.appendChild(meta);
+                row.addEventListener('click', () => {
+                    ipcRenderer.send('open-house-viewer', {
+                        placeId: place.id,
+                        isNew: false,
+                        debugPlacement: true
+                    });
+                    placeDebugModal.style.display = 'none';
+                });
+                list.appendChild(row);
+            });
+        }
+
         // Functions defined globally
         window.selectPlayMode = function (mode) {
             ipcRenderer.invoke('start-play-mode', mode).then(res => {
                 if (res.success) {
                     document.getElementById('play-modal').style.display = 'none';
                 } else {
-                    alert(res.message);
+                    showAlert(res.message);
                 }
             });
         };
@@ -1320,8 +1521,6 @@
                 document.getElementById('happiness-val').textContent = `${stats.happiness}/100`;
                 document.getElementById('happiness-bar').style.width = `${stats.happiness}%`;
                 const intimacy = typeof stats.intimacyScore === 'number' ? stats.intimacyScore : 0;
-                document.getElementById('intimacy-bar').style.width = `${Math.max(0, Math.min(100, intimacy))}%`;
-                document.getElementById('intimacy-val').textContent = `${intimacy.toFixed(1)}/100`;
 
                 // Update Character Image
                 if (stats.characterImage) {
@@ -1333,11 +1532,18 @@
                     document.getElementById('character-name').textContent = `${stats.characterName} (Lv.${stats.level})`;
                 }
                 document.getElementById('character-intimacy').textContent = `친밀도 ${intimacy.toFixed(1)}`;
+                const debugIntimacy = document.getElementById('debug-intimacy');
+                if (debugIntimacy) debugIntimacy.textContent = intimacy.toFixed(1);
 
                 // Update HP Bar
                 const hp = stats.hp !== undefined ? stats.hp : 100;
                 document.getElementById('hp-bar').style.width = `${hp}%`;
                 document.getElementById('hp-val').textContent = `${hp}/100`;
+                const debugHp = document.getElementById('debug-hp');
+                if (debugHp) debugHp.textContent = Math.round(hp);
+
+                const debugHappy = document.getElementById('debug-happiness');
+                if (debugHappy) debugHappy.textContent = Math.round(stats.happiness ?? 0);
 
                 // Death Handling
                 const charImg = document.getElementById('character-img');
@@ -1369,12 +1575,16 @@
                         document.getElementById('evo-bar').style.width = '100%';
                         document.getElementById('evo-val').textContent = '100%';
                     } else {
-                        document.getElementById('evo-bar').style.width = `${stats.evolutionProgress}%`;
-                        document.getElementById('evo-val').textContent = `${stats.evolutionProgress}%`;
+                        const evoProgress = Number(stats.evolutionProgress ?? 0);
+                        document.getElementById('evo-bar').style.width = `${evoProgress}%`;
+                        document.getElementById('evo-val').textContent = `${evoProgress.toFixed(2)}%`;
                     }
                 } else {
                     evoContainer.style.display = 'none';
                 }
+
+                const debugEvo = document.getElementById('debug-evo');
+                if (debugEvo) debugEvo.textContent = Number(stats.evolutionProgress ?? 0).toFixed(2);
 
                 // Update Play Button (Cooldown & Level Check) - Now inside Menu
                 const playBtn = document.getElementById('play-btn-menu');
@@ -1407,6 +1617,29 @@
         focusToggle.addEventListener('change', (e) => {
             ipcRenderer.send('toggle-focus-mode', e.target.checked);
         });
+
+        if (debugToggle) {
+            debugToggle.addEventListener('click', () => {
+                if (!debugPanel) return;
+                debugPanel.style.display = debugPanel.style.display === 'flex' ? 'none' : 'flex';
+            });
+        }
+
+        if (debugPanel) {
+            debugPanel.addEventListener('click', async (event) => {
+                const button = event.target.closest('.debug-btn');
+                if (!button) return;
+                const row = button.closest('.debug-row');
+                if (!row) return;
+                const key = row.dataset.key;
+                const delta = Number(button.dataset.delta) || 0;
+                const res = await ipcRenderer.invoke('debug-adjust-stat', { key, delta });
+                if (!res?.success) {
+                    showAlert(res?.message || '디버그 반영 실패');
+                }
+                updateStats();
+            });
+        }
 
         document.getElementById('start-btn').addEventListener('click', () => {
             ipcRenderer.send('start-game');
@@ -1457,24 +1690,28 @@
             menuModal.style.display = 'none';
             ipcRenderer.invoke('start-peek').then((res) => {
                 if (!res) return;
-                if (res.breeding) {
-                    // 번식 모드에서는 house-viewer를 breeding 모드로 열기
+                if (res.breedingStage) {
+                    // 번식 단계에서는 단계 정보를 넘겨서 house-viewer를 연다.
                     ipcRenderer.send('open-house-viewer', {
-                        placeId: 'house1',
+                        placeId: res.place?.id || 'school',
                         isNew: false,
-                        breeding: true
+                        breedingStage: res.breedingStage,
+                        breedingPartner: res.breedingPartner || null
                     });
                     return;
                 }
                 if (res.alreadyVisible) {
-                    alert('이미 화면에 있어요!');
+                    showToast('이미 화면에 있어요!');
                     return;
                 }
                 if (!res.place) return;
                 renderDiscoveredPlaces(res.discoveredPlaces || []);
                 ipcRenderer.send('open-house-viewer', {
                     placeId: res.place.id,
-                    isNew: res.isNew
+                    isNew: res.isNew,
+                    breedingStage: res.breedingStage || null,
+                    breedingPartner: res.breedingPartner || null,
+                    companion: res.companion || null
                 });
             });
         });
@@ -1490,6 +1727,14 @@
             await loadFriendsData();
             friendsModal.style.display = 'flex';
             menuModal.style.display = 'none';
+        });
+
+        document.getElementById('place-debug-btn').addEventListener('click', async () => {
+            menuModal.style.display = 'none';
+            const res = await ipcRenderer.invoke('get-all-places');
+            const places = res?.success ? (res.data || []) : [];
+            renderPlaceDebugList(places);
+            placeDebugModal.style.display = 'flex';
         });
 
         document.getElementById('character-info-btn').addEventListener('click', openCharacterInfo);
@@ -1545,6 +1790,10 @@
 
         document.getElementById('close-character-info').addEventListener('click', () => {
             characterInfoModal.style.display = 'none';
+        });
+
+        document.getElementById('close-place-debug').addEventListener('click', () => {
+            placeDebugModal.style.display = 'none';
         });
 
         // Listen for UI state updates from main process
