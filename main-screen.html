@@ -20,7 +20,18 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            -webkit-app-region: no-drag;
+        }
+
+        .drag-region {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 42px;
             -webkit-app-region: drag;
+            z-index: 1;
+            pointer-events: none;
         }
 
         .container {
@@ -42,6 +53,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            position: relative;
         }
 
         .character-preview img {
@@ -49,6 +61,23 @@
             max-height: 100%;
             object-fit: contain;
             animation: float 3s ease-in-out infinite;
+        }
+
+        .character-info-btn {
+            -webkit-app-region: no-drag;
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 32px;
+            height: 32px;
+            border-radius: 999px;
+            border: none;
+            cursor: pointer;
+            background: #111;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 700;
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.22);
         }
 
         @keyframes sway {
@@ -307,6 +336,7 @@
         }
 
         .modal {
+            -webkit-app-region: no-drag;
             background: white;
             padding: 20px;
             border-radius: 15px;
@@ -323,6 +353,7 @@
         }
 
         .modal-btn {
+            -webkit-app-region: no-drag;
             display: block;
             width: 100%;
             padding: 10px;
@@ -339,6 +370,7 @@
         }
 
         .modal-close {
+            -webkit-app-region: no-drag;
             margin-top: 10px;
             color: #888;
             font-size: 12px;
@@ -389,11 +421,13 @@
         }
 
         .friends-modal {
+            -webkit-app-region: no-drag;
             max-width: 360px;
             text-align: left;
         }
 
         .friends-tabs {
+            -webkit-app-region: no-drag;
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 6px;
@@ -401,6 +435,7 @@
         }
 
         .friends-tab {
+            -webkit-app-region: no-drag;
             border: 1px solid #ddd;
             border-radius: 8px;
             padding: 6px 8px;
@@ -418,6 +453,7 @@
         }
 
         .friends-section {
+            -webkit-app-region: no-drag;
             display: none;
             max-height: 280px;
             overflow: auto;
@@ -429,6 +465,7 @@
         }
 
         .friends-invite {
+            -webkit-app-region: no-drag;
             border: 1px dashed #bbb;
             border-radius: 10px;
             padding: 8px 10px;
@@ -446,12 +483,14 @@
         }
 
         .friends-controls {
+            -webkit-app-region: no-drag;
             display: grid;
             gap: 6px;
             margin-bottom: 10px;
         }
 
         .friends-input {
+            -webkit-app-region: no-drag;
             width: 100%;
             padding: 8px 10px;
             border: 1px solid #ddd;
@@ -460,6 +499,7 @@
         }
 
         .friends-row {
+            -webkit-app-region: no-drag;
             border: 1px solid #e5e5e5;
             border-radius: 10px;
             padding: 8px 10px;
@@ -481,12 +521,14 @@
         }
 
         .friends-actions {
+            -webkit-app-region: no-drag;
             display: flex;
             gap: 6px;
             margin-top: 4px;
         }
 
         .friends-action-btn {
+            -webkit-app-region: no-drag;
             border: none;
             border-radius: 8px;
             padding: 6px 8px;
@@ -500,6 +542,84 @@
         .friends-action-btn.secondary {
             background: #e9e9e9;
             color: #222;
+        }
+
+        .character-info-modal {
+            max-width: 360px;
+            text-align: left;
+        }
+
+        .info-section {
+            margin-bottom: 10px;
+        }
+
+        .info-title {
+            font-size: 12px;
+            font-weight: 900;
+            color: #222;
+            margin-bottom: 6px;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .info-card {
+            border: 1px solid #e5e5e5;
+            border-radius: 10px;
+            padding: 8px;
+            background: #fafafa;
+            display: grid;
+            gap: 2px;
+        }
+
+        .info-label {
+            font-size: 10px;
+            color: #777;
+            font-weight: 800;
+        }
+
+        .info-value {
+            font-size: 13px;
+            color: #111;
+            font-weight: 900;
+        }
+
+        .events-list {
+            max-height: 220px;
+            overflow: auto;
+            padding-right: 4px;
+            display: grid;
+            gap: 6px;
+        }
+
+        .event-row {
+            border: 1px solid #e5e5e5;
+            border-radius: 10px;
+            padding: 8px 10px;
+            background: #fafafa;
+            display: grid;
+            gap: 3px;
+        }
+
+        .event-type {
+            font-size: 11px;
+            font-weight: 900;
+            color: #111;
+        }
+
+        .event-text {
+            font-size: 12px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .event-time {
+            font-size: 10px;
+            color: #777;
+            font-weight: 700;
         }
 
         .places-list {
@@ -619,6 +739,7 @@
 </head>
 
 <body>
+    <div class="drag-region"></div>
     <button class="logout-btn" id="logout-btn">로그아웃</button>
     <button class="logout-btn" id="memorial-btn" style="left: 90px; background: transparent;">🪦 납골당</button>
     <button class="close-btn" id="close-btn">×</button>
@@ -630,6 +751,7 @@
         <div class="character-preview">
             <div class="death-msg" id="death-msg">DEAD</div>
             <img src="assets/a.png" alt="Character" id="character-img">
+            <button class="character-info-btn" id="character-info-btn" title="캐릭터 정보">🔍</button>
         </div>
 
         <p class="character-name" id="character-name">쿠치파치</p>
@@ -731,6 +853,21 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="character-info-modal">
+        <div class="modal character-info-modal">
+            <h3>캐릭터 정보</h3>
+            <div class="info-section">
+                <div class="info-title">상태</div>
+                <div class="info-grid" id="character-info-grid"></div>
+            </div>
+            <div class="info-section">
+                <div class="info-title">이벤트</div>
+                <div class="events-list" id="character-events-list"></div>
+            </div>
+            <div class="modal-close" id="close-character-info">닫기</div>
+        </div>
+    </div>
+
     <!-- Menu Modal -->
     <div class="modal-overlay" id="menu-modal">
         <div class="modal">
@@ -754,6 +891,7 @@
         const placesModal = document.getElementById('places-modal');
         const placesList = document.getElementById('places-list');
         const friendsModal = document.getElementById('friends-modal');
+        const characterInfoModal = document.getElementById('character-info-modal');
 
         let achievementsCache = [];
 
@@ -1016,6 +1154,75 @@
             renderAchievements(achievementsCache);
         }
 
+        function renderCharacterInfo(character, events) {
+            const grid = document.getElementById('character-info-grid');
+            const eventsList = document.getElementById('character-events-list');
+            grid.innerHTML = '';
+            eventsList.innerHTML = '';
+
+            const cards = [
+                { label: '이름', value: character.name },
+                { label: '초대코드', value: character.inviteCode || '-' },
+                { label: '종족', value: character.species || '-' },
+                { label: '단계', value: `${character.stageIndex ?? '-'}단계` },
+                { label: '행복도', value: `${character.happiness ?? '-'} / 100` },
+                { label: '배고픔', value: `${character.hunger ?? '-'} / 100` },
+                { label: '건강', value: `${character.health ?? '-'} / 100` },
+                { label: '생존', value: character.isAlive ? '살아있음' : '사망' }
+            ];
+
+            cards.forEach((c) => {
+                const card = document.createElement('div');
+                card.className = 'info-card';
+                const l = document.createElement('div');
+                l.className = 'info-label';
+                l.textContent = c.label;
+                const v = document.createElement('div');
+                v.className = 'info-value';
+                v.textContent = c.value ?? '-';
+                card.appendChild(l);
+                card.appendChild(v);
+                grid.appendChild(card);
+            });
+
+            if (!events?.length) {
+                const empty = document.createElement('div');
+                empty.className = 'achievement-desc';
+                empty.textContent = '아직 기록된 이벤트가 없어.';
+                eventsList.appendChild(empty);
+                return;
+            }
+
+            events.forEach((e) => {
+                const row = document.createElement('div');
+                row.className = 'event-row';
+                const type = document.createElement('div');
+                type.className = 'event-type';
+                type.textContent = e.eventType || 'EVENT';
+                const text = document.createElement('div');
+                text.className = 'event-text';
+                text.textContent = e.eventText || '-';
+                const time = document.createElement('div');
+                time.className = 'event-time';
+                const t = e.createdAt ? new Date(e.createdAt) : null;
+                time.textContent = t ? t.toLocaleString() : '';
+                row.appendChild(type);
+                row.appendChild(text);
+                row.appendChild(time);
+                eventsList.appendChild(row);
+            });
+        }
+
+        async function openCharacterInfo() {
+            const res = await ipcRenderer.invoke('character-get-info');
+            if (!res.success) {
+                alert(res.message || '캐릭터 정보를 불러오지 못했어.');
+                return;
+            }
+            renderCharacterInfo(res.data.character, res.data.events || []);
+            characterInfoModal.style.display = 'flex';
+        }
+
         function renderDiscoveredPlaces(places = []) {
             discoveredColumn.innerHTML = '';
             places.forEach((place) => {
@@ -1237,6 +1444,8 @@
             menuModal.style.display = 'none';
         });
 
+        document.getElementById('character-info-btn').addEventListener('click', openCharacterInfo);
+
         document.querySelectorAll('.friends-tab').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const tab = btn.dataset.tab;
@@ -1284,6 +1493,10 @@
 
         document.getElementById('close-friends').addEventListener('click', () => {
             friendsModal.style.display = 'none';
+        });
+
+        document.getElementById('close-character-info').addEventListener('click', () => {
+            characterInfoModal.style.display = 'none';
         });
 
         // Listen for UI state updates from main process

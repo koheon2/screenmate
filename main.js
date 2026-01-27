@@ -113,7 +113,12 @@ const INITIAL_STATS = {
     lastHungerDamageTime: Date.now(),
     lastAgingTime: Date.now(),
     birthday: Date.now(),
-    discoveredPlaces: []
+    discoveredPlaces: [],
+    birthEventSent: false,
+    deathEventSent: false,
+    loverFriendCharacterId: null,
+    childBornWithFriendId: null,
+    lastSyncedStageIndex: 0
 };
 
 function getPlaceById(id) {
@@ -335,6 +340,78 @@ async function getBootstrapSafe() {
         return await getBootstrapFromDB();
     } catch (e) {
         return bootstrapCache;
+    }
+}
+
+async function createEventInDB(characterId, eventType, eventText, metadata) {
+    if (!characterId) return null;
+    try {
+        return await apiRequest({
+            method: 'POST',
+            url: `${API_BASE_URL}/characters/${characterId}/events`,
+            data: {
+                eventType,
+                eventText,
+                metadata: metadata || null
+            }
+        });
+    } catch (err) {
+        console.error('[Event] Failed to create event:', err.response?.data || err.message);
+        return null;
+    }
+}
+
+async function recordCharacterEvent(eventType, eventText, metadata) {
+    const characterId = await getOrSyncCharacterId();
+    if (!characterId) return null;
+    return createEventInDB(characterId, eventType, eventText, metadata);
+}
+
+async function getCharacterDetailFromDB(characterId) {
+    if (!characterId) return null;
+    try {
+        return await apiRequest({
+            method: 'GET',
+            url: `${API_BASE_URL}/characters/${characterId}`
+        });
+    } catch (err) {
+        console.error('[Character] Failed to fetch detail:', err.response?.data || err.message);
+        return null;
+    }
+}
+
+async function getCharacterEventsFromDB(characterId, limit = 30) {
+    if (!characterId) return [];
+    try {
+        const data = await apiRequest({
+            method: 'GET',
+            url: `${API_BASE_URL}/characters/${characterId}/events`,
+            params: { limit }
+        });
+        return Array.isArray(data) ? data : [];
+    } catch (err) {
+        console.error('[Event] Failed to fetch events:', err.response?.data || err.message);
+        return [];
+    }
+}
+
+async function syncStageFloorFromServerOnLogin() {
+    try {
+        if (!global.authTokens || !playerStats?.dbCharacterId) {
+            playerStats.lastSyncedStageIndex = playerStats?.level || 0;
+            return;
+        }
+        const bootstrap = await getBootstrapSafe();
+        const characters = bootstrap?.characters || [];
+        const me = characters.find((c) => c.id === playerStats.dbCharacterId);
+        if (me && typeof me.stageIndex === 'number') {
+            playerStats.lastSyncedStageIndex = me.stageIndex;
+        } else {
+            playerStats.lastSyncedStageIndex = playerStats.level || 0;
+        }
+        saveUserData();
+    } catch (e) {
+        playerStats.lastSyncedStageIndex = playerStats?.level || 0;
     }
 }
 
@@ -708,6 +785,14 @@ function handleDeath() {
         characterWindow = null;
     }
     console.log('--- CHARACTER HAS DIED ---');
+    if (!playerStats.deathEventSent) {
+        playerStats.deathEventSent = true;
+        recordCharacterEvent('DEATH', '세상을 떠났다.', {
+            level: playerStats.level,
+            happiness: playerStats.happiness
+        });
+        saveUserData();
+    }
 }
 
 // ==================== HOME ICON WINDOW ====================
@@ -1199,6 +1284,7 @@ ipcMain.on('google-login', async () => {
         console.log('Login successful:', currentUser.displayName);
 
         loadUserData();
+        await syncStageFloorFromServerOnLogin();
         if (loginWindow) loginWindow.close();
         createMainWindow();
         createTray();
@@ -1449,6 +1535,7 @@ function evolveCharacter(targetLevel) {
             console.log(`[Evolution] Selected image: ${fullPath}`);
 
             // UPDATE STATS
+            const previousLevel = playerStats.level || 0;
             playerStats.level = targetLevel;
             playerStats.evolutionProgress = 0;
             playerStats.lastEvolutionTime = Date.now();
@@ -1470,6 +1557,21 @@ function evolveCharacter(targetLevel) {
 
             saveUserData();
             console.log(`[Evolution] Success! Level ${targetLevel}`);
+
+            if (previousLevel === 0 && !playerStats.birthEventSent) {
+                playerStats.birthEventSent = true;
+                recordCharacterEvent('MILESTONE', `${getKoreanName(randomCharName)}가 태어났다.`, {
+                    level: targetLevel,
+                    name: getKoreanName(randomCharName)
+                });
+                saveUserData();
+            } else if (targetLevel > previousLevel) {
+                recordCharacterEvent('EVOLUTION', `${getKoreanName(randomCharName)}로 진화했다.`, {
+                    fromLevel: previousLevel,
+                    toLevel: targetLevel,
+                    name: getKoreanName(randomCharName)
+                });
+            }
         });
     });
 }
@@ -1801,6 +1903,27 @@ ipcMain.handle('friend-get-friends', async () => {
         const characterId = await getOrSyncCharacterId();
         if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
         const data = await getFriends(characterId);
+
+        // Intimacy milestone: 100 => lover, and then child once.
+        const lover = data.find((f) => (f.intimacy || 0) >= 100);
+        if (lover && !playerStats.loverFriendCharacterId) {
+            playerStats.loverFriendCharacterId = lover.friendCharacterId;
+            recordCharacterEvent('MILESTONE', `${lover.friendName}와(과) 연인이 됐다.`, {
+                friendCharacterId: lover.friendCharacterId,
+                friendName: lover.friendName,
+                intimacy: lover.intimacy
+            });
+            saveUserData();
+        }
+        if (lover && playerStats.loverFriendCharacterId === lover.friendCharacterId && !playerStats.childBornWithFriendId) {
+            playerStats.childBornWithFriendId = lover.friendCharacterId;
+            recordCharacterEvent('MILESTONE', `${lover.friendName}와(과) 아이를 낳았다.`, {
+                friendCharacterId: lover.friendCharacterId,
+                friendName: lover.friendName
+            });
+            saveUserData();
+        }
+
         return { success: true, data };
     } catch (err) {
         return { success: false, message: err.response?.data?.message || err.message };
@@ -1862,6 +1985,23 @@ ipcMain.handle('progress-get-places', async () => {
             unlocked: discoveredPlaces.has(place.id)
         }));
         return { success: true, data: places };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('character-get-info', async () => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
+        const [character, events] = await Promise.all([
+            getCharacterDetailFromDB(characterId),
+            getCharacterEventsFromDB(characterId, 40)
+        ]);
+        if (!character) {
+            return { success: false, message: '캐릭터 정보를 가져오지 못했어.' };
+        }
+        return { success: true, data: { character, events } };
     } catch (err) {
         return { success: false, message: err.response?.data?.message || err.message };
     }
@@ -2022,6 +2162,7 @@ app.whenReady().then(async () => {
     if (autoLoginSuccess) {
         // User is already logged in, go straight to main screen
         loadUserData();
+        await syncStageFloorFromServerOnLogin();
         createMainWindow();
         createTray();
     } else {
