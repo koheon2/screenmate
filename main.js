@@ -135,6 +135,17 @@ function getCharacterGender(englishName) {
     return FEMALE_CHARACTERS.has(englishName) ? 'female' : 'male';
 }
 
+const BREEDING_STAGES = {
+    KISSING: 'KISSING',
+    EGG_HOME: 'EGG_HOME',
+    EGG_ACQUIRED: 'EGG_ACQUIRED',
+    CRADLE: 'CRADLE'
+};
+
+function isBreedingActive() {
+    return !!playerStats?.breedingStage;
+}
+
 const FEMALE_CHARACTER_NAMES = new Set([
     'marupitchi',
     'chiroritchi',
@@ -177,8 +188,9 @@ const INITIAL_STATS = {
     lastSyncedStageIndex: 0,
     assignedHouseId: null,
     awayModeActive: false,
-    isBreeding: false,
+    breedingStage: null,
     breedingPartner: null,
+    breedingParentCharacterId: null,
     hasEgg: false,
     sleepModeActive: false,
     wokeUpEarlyDate: null,
@@ -493,6 +505,20 @@ function loadUserData() {
                 playerStats.sickModeActive = !!playerStats.sickModeActive;
                 playerStats.sickAnnounced = !!playerStats.sickAnnounced;
                 playerStats.sickRecovered = !!playerStats.sickRecovered;
+                if (!playerStats.breedingStage && playerStats.isBreeding) {
+                    playerStats.breedingStage = BREEDING_STAGES.KISSING;
+                }
+                if (!Object.values(BREEDING_STAGES).includes(playerStats.breedingStage)) {
+                    playerStats.breedingStage = null;
+                }
+                if (!playerStats.breedingParentCharacterId && playerStats.breedingStage) {
+                    playerStats.breedingParentCharacterId = playerStats.dbCharacterId || null;
+                }
+                if (playerStats.breedingStage && !playerStats.breedingPartner && !playerStats.hasEgg) {
+                    // Recover from older test data that left breeding state without a partner.
+                    playerStats.breedingStage = null;
+                }
+                delete playerStats.isBreeding;
 
                 console.log('Loaded user data. Active Pet:', playerStats.characterName, 'History count:', petHistory.length);
             }
@@ -755,6 +781,19 @@ async function tryCreatePendingLineage() {
     if (!childCharacterId) return;
 
     const { parentACharacterId, parentBCharacterId } = playerStats.pendingLineageParents;
+    if (!parentACharacterId || !parentBCharacterId) {
+        playerStats.pendingLineageParents = null;
+        return;
+    }
+    // Guard against invalid lineage payloads after merges or partial resets.
+    if (
+        childCharacterId === parentACharacterId ||
+        childCharacterId === parentBCharacterId ||
+        parentACharacterId === parentBCharacterId
+    ) {
+        playerStats.pendingLineageParents = null;
+        return;
+    }
     const created = await createLineageInDB(childCharacterId, parentACharacterId, parentBCharacterId);
     if (created) {
         playerStats.lineageCreated = true;
@@ -1152,6 +1191,12 @@ ipcMain.handle('llm-chat', async (event, { message } = {}) => {
             }
             return { success: true, data: { message: '쿨럭쿨럭' } };
         }
+        if (isBreedingActive()) {
+            if (characterWindow && !characterWindow.isDestroyed()) {
+                characterWindow.webContents.send('show-speech', '...');
+            }
+            return { success: true, data: { message: '...' } };
+        }
         const text = (message || '').trim();
         if (!text) {
             return { success: false, message: '메시지를 입력해줘.' };
@@ -1456,7 +1501,25 @@ async function capturePrimaryScreenDataUrl() {
     }
 }
 
-async function createHouseWindow(placeId = 'home', isNewPlace = false, isBreeding = false) {
+function resolveSpritePathFor(name, level, emotion = 'normal.webp') {
+    if (!name) return null;
+    const candidate = path.join(__dirname, `assets/level${level}`, name, emotion);
+    if (fs.existsSync(candidate)) return candidate;
+    const fallback = path.join(__dirname, `assets/level${level}`, name, 'normal.webp');
+    if (fs.existsSync(fallback)) return fallback;
+    return null;
+}
+
+function resolveBreedingPartnerImageUrl(partner) {
+    const partnerName = partner?.friendName || '';
+    const partnerPath =
+        resolveSpritePathFor(partnerName, 3, 'kissing.webp') ||
+        resolveSpritePathFor(partnerName, 3, 'normal.webp') ||
+        path.join(__dirname, 'assets/level3/mametchi/normal.webp');
+    return pathToFileURL(partnerPath).toString();
+}
+
+async function createHouseWindow(placeId = 'home', isNewPlace = false, breedingStage = null, breedingPartner = null) {
     if (houseWindow) {
         houseWindow.show();
         return;
@@ -1480,6 +1543,7 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false, isBreedin
     const screenCaptureUrl = await capturePrimaryScreenDataUrl();
     const place = getPlaceById(placeId);
     const sleeping = !!playerStats?.sleepModeActive;
+    const isBreedingKissing = breedingStage === BREEDING_STAGES.KISSING;
 
     houseWindow = new BrowserWindow({
         width: startBounds.width,
@@ -1502,14 +1566,15 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false, isBreedin
         houseWindow.setAlwaysOnTop(true, 'screen-saver');
     }
 
-    const imgUrl = playerStats && playerStats.characterImage
-        ? pathToFileURL(playerStats.characterImage).toString()
-        : '';
-
-    // Partner image for breeding mode
-    const partnerImgUrl = isBreeding ? pathToFileURL(path.join(__dirname, 'assets/level3/mametchi/normal.webp')).toString() : '';
-
-    console.log('[HouseWindow] isBreeding:', isBreeding, 'partnerImgUrl:', partnerImgUrl);
+    let spritePath = playerStats?.characterImage || '';
+    if (isBreedingKissing) {
+        const kissingPath =
+            resolveSpritePathFor(playerStats.characterName, 3, 'kissing.webp') ||
+            resolveSpritePathFor(playerStats.characterName, 3, 'normal.webp');
+        if (kissingPath) spritePath = kissingPath;
+    }
+    const imgUrl = spritePath ? pathToFileURL(spritePath).toString() : '';
+    const partnerImgUrl = isBreedingKissing ? resolveBreedingPartnerImageUrl(breedingPartner) : '';
 
     houseWindow.loadFile('house-viewer.html', {
         query: {
@@ -1522,8 +1587,11 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false, isBreedin
             isNew: isNewPlace ? '1' : '0',
             sleeping: sleeping ? '1' : '0',
             hasEgg: (playerStats && playerStats.hasEgg) ? '1' : '0',
-            breeding: isBreeding ? '1' : '0',
-            partnerImg: partnerImgUrl
+            breedingStage: breedingStage || '',
+            breeding: isBreedingKissing ? '1' : '0',
+            partnerImg: partnerImgUrl,
+            partnerName: breedingPartner?.friendName || '',
+            partnerCharacterId: breedingPartner?.friendCharacterId || ''
         }
     });
     houseWindow.on('closed', () => houseWindow = null);
@@ -1814,28 +1882,6 @@ function createTray() {
     tray.setContextMenu(contextMenu);
 }
 
-
-ipcMain.handle('test-trigger-breeding', () => {
-    if (!playerStats) return { success: false, message: 'Character not initialized' };
-
-    playerStats.isBreeding = true;
-    playerStats.level = 3; // Force level 3 for UI to show
-    playerStats.breedingPartner = {
-        friendCharacterId: 'test-partner-uuid',
-        friendName: '테스트 파트너',
-        friendSpecies: '고양이',
-        intimacy: 100
-    };
-    saveUserData();
-
-    // Notify windows to update UI
-    if (mainWindow) mainWindow.webContents.send('update-stats', playerStats);
-    if (playWindow) playWindow.webContents.send('breeding-start');
-
-    console.log('[Test] Triggered forced breeding mode.');
-    return { success: true };
-});
-
 // ==================== WINDOW MANAGEMENT ====================
 
 ipcMain.on('close-app', () => app.quit());
@@ -2033,18 +2079,24 @@ ipcMain.on('show-main-window', () => {
 ipcMain.handle('start-peek', () => {
     recomputeSleepMode(new Date());
 
-    if (playerStats.isBreeding) return { breeding: true };
-    if (playerStats.hasEgg) {
-        const assignedHouseId = ensureAssignedHouseId();
-        const place = getPlaceById(assignedHouseId || 'house1');
-        const discovered = new Set(playerStats.discoveredPlaces || []);
-        if (!discovered.has(place.id)) {
-            discovered.add(place.id);
-            playerStats.discoveredPlaces = Array.from(discovered);
-            saveUserData();
+    if (isBreedingActive()) {
+        let placeId = 'school';
+        if (playerStats.breedingStage === BREEDING_STAGES.EGG_HOME) {
+            placeId = ensureAssignedHouseId() || 'house1';
+        } else if (playerStats.breedingStage === BREEDING_STAGES.CRADLE) {
+            placeId = 'cradle';
         }
-        const discoveredPlaces = playerStats.discoveredPlaces.map((id) => getPlaceById(id));
-        return { place, isNew: false, discoveredPlaces, hasEgg: true };
+        addDiscoveredPlace(placeId);
+        const discoveredPlaces = (playerStats.discoveredPlaces || []).map((id) => getPlaceById(id));
+        saveUserData({ touchLocalUpdatedAt: false });
+        return {
+            place: getPlaceById(placeId),
+            isNew: false,
+            discoveredPlaces,
+            breedingStage: playerStats.breedingStage,
+            breedingPartner: playerStats.breedingPartner || null,
+            hasEgg: playerStats.hasEgg
+        };
     }
 
     if (characterWindow && !characterState.isReturningHome) {
@@ -2101,8 +2153,9 @@ ipcMain.on('open-house-viewer', (event, payload = {}) => {
     }
     const placeId = payload.placeId || 'home';
     const isNewPlace = !!payload.isNew;
-    const isBreeding = !!payload.breeding;
-    createHouseWindow(placeId, isNewPlace, isBreeding);
+    const breedingStage = payload.breedingStage || (isBreedingActive() ? playerStats.breedingStage : null);
+    const breedingPartner = payload.breedingPartner || playerStats?.breedingPartner || null;
+    createHouseWindow(placeId, isNewPlace, breedingStage, breedingPartner);
 });
 
 ipcMain.on('close-house-viewer', () => {
@@ -2128,46 +2181,57 @@ ipcMain.on('toggle-character', () => {
             closeChatWindow();
         }
     } else {
-        recomputeSleepMode(new Date());
-        if (playerStats.isBreeding) {
-            if (homeWindow) homeWindow.webContents.send('home-speech', '...');
-            return;
-        }
-        refreshFriendsCache();
-        if (playerStats.sleepModeActive) {
-            playerStats.awayModeActive = false;
-            saveUserData();
-            if (homeWindow) {
-                homeWindow.webContents.send('home-speech', '...');
+        (async () => {
+            recomputeSleepMode(new Date());
+            if (isBreedingActive()) {
+                if (homeWindow) homeWindow.webContents.send('home-speech', '...');
+                return;
             }
-            return;
-        }
-        if (playerStats.forcedAwayPlaceId) {
-            if (homeWindow) {
-                homeWindow.webContents.send('home-speech', '...');
+
+            refreshFriendsCache();
+            if (playerStats.sleepModeActive) {
+                playerStats.awayModeActive = false;
+                saveUserData();
+                if (homeWindow) {
+                    homeWindow.webContents.send('home-speech', '...');
+                }
+                return;
             }
-            return;
-        }
-        if (maybeTriggerPoliceAfterBank()) return;
-        if (maybeTriggerCafeVisit()) return;
-        if (maybeTriggerSchoolVisit()) return;
-        if (maybeTriggerToiletVisit()) return;
-        if (maybeTriggerPark2Visit()) return;
-        if (playerStats.awayModeActive) {
-            playerStats.awayModeActive = false;
-            saveUserData();
+            if (playerStats.forcedAwayPlaceId) {
+                if (homeWindow) {
+                    homeWindow.webContents.send('home-speech', '...');
+                }
+                return;
+            }
+
+            // Breeding starts only when the user presses home and conditions are met.
+            const breedingStarted = await startBreedingFlow();
+            if (breedingStarted) {
+                if (homeWindow) homeWindow.webContents.send('home-speech', '...');
+                return;
+            }
+
+            if (maybeTriggerPoliceAfterBank()) return;
+            if (maybeTriggerCafeVisit()) return;
+            if (maybeTriggerSchoolVisit()) return;
+            if (maybeTriggerToiletVisit()) return;
+            if (maybeTriggerPark2Visit()) return;
+            if (playerStats.awayModeActive) {
+                playerStats.awayModeActive = false;
+                saveUserData();
+                createCharacterWindow();
+                return;
+            }
+            if (playerStats.level >= 1 && Math.random() < 0.3) {
+                playerStats.awayModeActive = true;
+                saveUserData();
+                if (homeWindow) {
+                    homeWindow.webContents.send('home-speech', '...');
+                }
+                return;
+            }
             createCharacterWindow();
-            return;
-        }
-        if (playerStats.level >= 1 && Math.random() < 0.3) {
-            playerStats.awayModeActive = true;
-            saveUserData();
-            if (homeWindow) {
-                homeWindow.webContents.send('home-speech', '...');
-            }
-            return;
-        }
-        createCharacterWindow();
+        })().catch((e) => console.error('[Home] toggle-character failed', e));
     }
 });
 
@@ -2389,6 +2453,17 @@ function evolveCharacter(targetLevel) {
 
             playerStats.evolutionHistory.push({ level: targetLevel, name: randomCharName, date: Date.now() });
 
+            if (targetLevel === 1 && playerStats.breedingStage === BREEDING_STAGES.CRADLE) {
+                markAchievement('origin-village', '태초마을');
+                playerStats.breedingStage = null;
+                playerStats.breedingPartner = null;
+                playerStats.breedingParentCharacterId = null;
+                playerStats.hasEgg = false;
+                clearForcedAway();
+                friendsCache = [];
+                friendsCacheAt = 0;
+            }
+
             // Notify Renderer
             if (characterWindow) {
                 characterWindow.webContents.send('update-image', toRenderableImage(fullPath));
@@ -2497,14 +2572,38 @@ function updateDynamicImage() {
 
 // Check evolution progress and decrease happiness periodically
 // ==================== STATUS & HP MANAGEMENT (Every 1 Minute) ====================
-async function checkBreedingCondition() {
-    if (!playerStats || playerStats.level !== 3 || playerStats.isBreeding || playerStats.hasEgg) return;
+function getFriendStageIndex(friend) {
+    return (
+        friend?.friendStageIndex ??
+        friend?.friendStage ??
+        friend?.stageIndex ??
+        friend?.stage_index ??
+        0
+    );
+}
+
+function getFriendGender(friend) {
+    const raw =
+        friend?.friendGender ??
+        friend?.gender ??
+        null;
+    if (raw === 'male' || raw === 'female') return raw;
+    const name = friend?.friendName || friend?.friendCharacterName || '';
+    return getGenderForCharacterName(name) || 'male';
+}
+
+async function findEligibleBreedingPartner() {
+    if (!playerStats || playerStats.level < 3 || isBreedingActive() || playerStats.hasEgg) return null;
+    const myGender = playerStats.gender || getGenderForCharacterName(playerStats.characterName);
+    if (!myGender) return null;
+
     try {
         const charId = await getOrSyncCharacterId();
-        if (!charId) return;
+        if (!charId) return null;
         const friends = await getFriends(charId);
         const now = Date.now();
-        const candidates = friends.filter(f => {
+
+        const candidates = friends.filter((f) => {
             let intimacy = f.intimacy || 0;
             const baseTime = f.createdAt || f.created_at || f.updatedAt || f.updated_at;
             if (baseTime) {
@@ -2512,23 +2611,76 @@ async function checkBreedingCondition() {
                 const computed = Math.floor(Math.min(1, elapsed / 1800000) * 100);
                 if (computed > intimacy) intimacy = computed;
             }
-            return intimacy >= 100;
+            if (intimacy < 100) return false;
+            if (getFriendStageIndex(f) < 3) return false;
+            const friendGender = getFriendGender(f);
+            return friendGender && friendGender !== myGender;
         });
 
-        if (candidates.length > 0 && Math.random() < 0.3) {
-            const partner = candidates[Math.floor(Math.random() * candidates.length)];
-            playerStats.isBreeding = true;
-            playerStats.breedingPartner = partner;
-            playerStats.awayModeActive = false;
-            console.log('[Breeding] Started with ' + partner.friendName);
-            saveUserData();
-        }
-    } catch (e) { console.error('[Breeding] Check failed', e); }
+        if (candidates.length === 0) return null;
+        return candidates[Math.floor(Math.random() * candidates.length)];
+    } catch (e) {
+        console.error('[Breeding] Partner search failed', e);
+        return null;
+    }
+}
+
+function hideCharacterImage() {
+    playerStats.characterImage = '';
+    if (characterWindow && !characterWindow.isDestroyed()) {
+        characterWindow.webContents.send('update-image', '');
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('update-image', '');
+    }
+}
+
+function showEggInUi() {
+    const eggPath = path.join(__dirname, 'assets/egg.svg');
+    playerStats.characterImage = eggPath;
+    const renderable = toRenderableImage(eggPath);
+    if (characterWindow && !characterWindow.isDestroyed()) {
+        characterWindow.webContents.send('update-image', renderable);
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('update-image', renderable);
+    }
+}
+
+async function retireCurrentCharacterForBreeding() {
+    const parentId = playerStats.breedingParentCharacterId;
+    if (!ENABLE_DB_SYNC || !parentId) return;
+    try {
+        await updateCharacterInDB(parentId, {
+            isAlive: false,
+            diedAt: new Date().toISOString()
+        });
+    } catch (e) {
+        // Best effort only.
+    }
+}
+
+async function startBreedingFlow() {
+    const partner = await findEligibleBreedingPartner();
+    if (!partner) return false;
+
+    playerStats.breedingStage = BREEDING_STAGES.KISSING;
+    playerStats.breedingPartner = {
+        friendCharacterId: partner.friendCharacterId,
+        friendName: partner.friendName,
+        friendSpecies: partner.friendSpecies,
+        friendGender: getFriendGender(partner),
+        friendStageIndex: getFriendStageIndex(partner)
+    };
+    playerStats.breedingParentCharacterId = playerStats.dbCharacterId || null;
+    playerStats.awayModeActive = false;
+    playerStats.hasEgg = false;
+    saveUserData({ touchLocalUpdatedAt: false });
+    return true;
 }
 
 setInterval(() => {
     if (!playerStats) return;
-    checkBreedingCondition();
 
     // 0. Watchdog: Ensure Home icon exists
     if (isGameRunning && !homeWindow) {
@@ -2678,6 +2830,9 @@ setInterval(async () => {
     // Call LLM every 2 minutes
     if (playerStats && isGameRunning) {
         if (playerStats.sickModeActive && !playerStats.sickRecovered) {
+            return;
+        }
+        if (isBreedingActive()) {
             return;
         }
 
@@ -2903,20 +3058,12 @@ ipcMain.handle('friend-get-friends', async () => {
 
         const enrichedData = await Promise.all(data.map(async (f) => {
             const characterMap = getCharacterDetailsMap(bootstrap?.characters || []);
-            let detail = characterMap.get(f.friendCharacterId);
-
-            // If not found in local bootstrap (current user's chars), fetch individual detail
-            if (!detail) {
-                try {
-                    detail = await getCharacterDetailFromDB(f.friendCharacterId);
-                } catch (e) {
-                    console.log(`[Friend] Failed to fetch detail for ${f.friendCharacterId}`);
-                }
-            }
+            const detail = characterMap.get(f.friendCharacterId);
 
             return {
                 ...f,
-                friendLevel: detail ? (detail.level ?? detail.stageIndex ?? 0) : (f.friendLevel || 0)
+                // Do not fetch other users' character detail; use friend fields when available.
+                friendLevel: f.friendStageIndex ?? f.friendLevel ?? detail?.stageIndex ?? 0
             };
         }));
 
@@ -3086,6 +3233,9 @@ ipcMain.handle('start-play-mode', (event, mode) => {
     if (playerStats?.sickModeActive && !playerStats?.sickRecovered) {
         return { success: false, message: '쿨럭쿨럭... 지금은 힘들어.' };
     }
+    if (isBreedingActive()) {
+        return { success: false, message: '지금은 바빠...' };
+    }
     if (now - playerStats.lastPlayTime < PLAY_COOLDOWN) {
         return { success: false, message: '아직 놀아줄 수 없습니다. (쿨타임 중)' };
     }
@@ -3135,21 +3285,92 @@ ipcMain.on('close-play-window', () => {
     }
 });
 
-ipcMain.on('egg-acquired', () => {
-    if (playerStats.isBreeding || playerStats.breedingPartner) {
-        playerStats.isBreeding = false;
-        playerStats.breedingPartner = null;
-        playerStats.hasEgg = true;
-        console.log('[Breeding] Egg acquired! Phase changed to hasEgg.');
-        saveUserData();
+function archiveCurrentPet(reason) {
+    if (!playerStats) return;
+    const snapshot = {
+        ...playerStats,
+        retiredAt: Date.now(),
+        retiredReason: reason
+    };
+    petHistory.push(snapshot);
+}
 
-        if (playWindow) {
-            playWindow.close();
-            playWindow = null;
-        }
-        if (characterWindow) characterWindow.show();
-        if (homeWindow) homeWindow.webContents.send('home-speech', '알을 얻었다!');
+ipcMain.on('breeding-kiss-seen', () => {
+    if (!isBreedingActive() || playerStats.breedingStage !== BREEDING_STAGES.KISSING) return;
+    markAchievement('heart-emoji', '하트 이모지');
+    playerStats.breedingStage = BREEDING_STAGES.EGG_HOME;
+    hideCharacterImage();
+    saveUserData({ touchLocalUpdatedAt: false });
+});
+
+ipcMain.on('breeding-egg-acquired', async () => {
+    if (!isBreedingActive() || playerStats.breedingStage !== BREEDING_STAGES.EGG_HOME) return;
+
+    const parentACharacterId = playerStats.breedingParentCharacterId || playerStats.dbCharacterId || null;
+    const parentBCharacterId = playerStats.breedingPartner?.friendCharacterId || null;
+    const preservedAchievements = playerStats.achievements || {};
+    const preservedPlaces = playerStats.discoveredPlaces || [];
+    const preservedPark2 = playerStats.park2UsedFriendIds || [];
+
+    archiveCurrentPet('BREEDING');
+    await retireCurrentCharacterForBreeding();
+
+    // Reset into a fresh egg state while preserving meta-progress.
+    playerStats.level = 0;
+    playerStats.happiness = 50;
+    playerStats.hp = 100;
+    playerStats.clickCount = 0;
+    playerStats.evolutionProgress = 0;
+    playerStats.lastEvolutionTime = Date.now();
+    playerStats.lastPlayTime = 0;
+    playerStats.lastFedTime = Date.now();
+    playerStats.lastHungerDamageTime = Date.now();
+    playerStats.lastAgingTime = Date.now();
+    playerStats.birthday = Date.now();
+    playerStats.gender = null;
+    playerStats.characterName = null;
+    playerStats.assignedHouseId = null;
+    playerStats.awayModeActive = false;
+    clearForcedAway();
+    playerStats.sleepModeActive = false;
+    playerStats.wokeUpEarlyDate = null;
+    playerStats.intimacyScore = 0;
+    playerStats.feedCount = 0;
+    playerStats.visibleAccumMillis = 0;
+    playerStats.visibleLastTickAt = Date.now();
+    playerStats.sickModeActive = false;
+    playerStats.sickAnnounced = false;
+    playerStats.sickRecovered = false;
+    playerStats.achievements = preservedAchievements;
+    playerStats.discoveredPlaces = preservedPlaces;
+    playerStats.park2UsedFriendIds = preservedPark2;
+
+    playerStats.hasEgg = true;
+    playerStats.breedingStage = BREEDING_STAGES.CRADLE;
+    showEggInUi();
+
+    if (parentACharacterId && parentBCharacterId) {
+        playerStats.pendingLineageParents = { parentACharacterId, parentBCharacterId };
+        playerStats.lineageCreated = false;
     }
+
+    // Detach from the previous character so a fresh one is created on next sync.
+    playerStats.dbCharacterId = null;
+    playerStats.lastSyncedStageIndex = 0;
+    playerStats.serverVersion = 0;
+    playerStats.serverUpdatedAt = 0;
+    playerStats.localUpdatedAt = Date.now();
+    friendsCache = [];
+    friendsCacheAt = 0;
+
+    saveUserData({ touchLocalUpdatedAt: false });
+
+    if (homeWindow) homeWindow.webContents.send('home-speech', '...');
+});
+
+// Back-compat with older house viewer builds.
+ipcMain.on('egg-acquired', () => {
+    ipcMain.emit('breeding-egg-acquired');
 });
 
 ipcMain.on('ball-position', (event, { x, y }) => {

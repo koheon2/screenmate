@@ -821,8 +821,6 @@
         <button class="play-btn" id="menu-btn" style="margin-top: 5px; background: #007bff;">메뉴</button>
 
         <div class="toggle-container">
-            <button class="play-btn" id="test-breed-btn" style="background: #9b59b6; margin-right: 10px;">⚡ 번식
-                테스트</button>
             <span class="toggle-label">집중 모드</span>
             <label class="switch">
                 <input type="checkbox" id="focus-mode-toggle">
@@ -1495,16 +1493,6 @@
         });
 
         document.getElementById('character-info-btn').addEventListener('click', openCharacterInfo);
-
-        // TEST BUTTON LOGIC
-        const testBtn = document.getElementById('test-breed-btn');
-        if (testBtn) {
-            testBtn.addEventListener('click', () => {
-                ipcRenderer.invoke('test-trigger-breeding').then(res => {
-                    alert(res.success ? '번식 모드 시작! (집 아이콘 클릭해보세요)' : '실패: ' + res.message);
-                });
-            });
-        }
 
         document.querySelectorAll('.friends-tab').forEach((btn) => {
             btn.addEventListener('click', async () => {
