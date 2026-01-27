@@ -1,4 +1,3 @@
-const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
 require('dotenv').config();
 
 const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell, desktopCapturer } = require('electron');
@@ -278,9 +277,6 @@ async function updateCharacterInDB(characterId, updates, isRetry = false) {
         return null;
     }
 }
-
-// Call LLM API
-const { desktopCapturer } = require('electron');
 
 // Call LLM API (with optional screenshot)
 // Call LLM API (with optional screenshot)
