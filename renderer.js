@@ -121,9 +121,9 @@ character.addEventListener('mouseleave', () => {
 character.addEventListener('click', () => {
     ipcRenderer.send('egg-clicked');
 
-    // Wobble effect on click
-    animationWrapper.classList.add('wobble');
-    setTimeout(() => animationWrapper.classList.remove('wobble'), 500);
+    // Vibrate effect on click
+    character.classList.add('click-vibrate');
+    setTimeout(() => character.classList.remove('click-vibrate'), 200);
 });
 
 
