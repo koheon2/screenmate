@@ -328,20 +328,27 @@ function checkFoodGiven() {
         food.style.display = 'none';
         ipcRenderer.send('food-eaten');
 
-        // Show text locally too (or just allow main window to handle speech)
+        // Show speech bubble
         const txt = document.createElement('div');
-        txt.textContent = "존맛탱!! 🍖";
-        txt.style.position = 'absolute';
-        txt.style.transform = `translate(${charState.x}px, ${charState.y - 50}px)`;
-        txt.style.fontSize = '24px';
-        txt.style.fontWeight = 'bold';
-        txt.style.backgroundColor = 'white';
-        txt.style.padding = '8px 12px';
-        txt.style.borderRadius = '12px';
+        txt.textContent = "존맛탱!";
+        txt.style.cssText = `
+            position: absolute;
+            left: ${charState.x + 60}px;
+            top: ${charState.y - 60}px;
+            font-size: 28px;
+            font-weight: bold;
+            color: #333;
+            background: white;
+            padding: 12px 20px;
+            border-radius: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            z-index: 100;
+            animation: popIn 0.3s ease;
+        `;
         document.body.appendChild(txt);
 
         // Close faster (0.5s) to reduce latency feel
-        setTimeout(() => endGame(), 500);
+        setTimeout(() => endGame(), 800);
     }
 }
 
