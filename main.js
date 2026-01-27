@@ -123,7 +123,9 @@ const INITIAL_STATS = {
     childBornWithFriendId: null,
     lastSyncedStageIndex: 0,
     assignedHouseId: null,
-    awayModeActive: false
+    awayModeActive: false,
+    sleepModeActive: false,
+    wokeUpEarlyDate: null
 };
 
 function getPlaceById(id) {
@@ -133,6 +135,29 @@ function getPlaceById(id) {
 function pickRandomPlace() {
     const idx = Math.floor(Math.random() * PLACES.length);
     return PLACES[idx];
+}
+
+function toDateKey(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function recomputeSleepMode(now = new Date()) {
+    if (!playerStats) return false;
+    const sleepHours = now.getHours() < 6;
+    const todayKey = toDateKey(now);
+
+    if (!sleepHours) {
+        playerStats.sleepModeActive = false;
+        playerStats.wokeUpEarlyDate = null;
+        return false;
+    }
+
+    const wokeToday = playerStats.wokeUpEarlyDate === todayKey;
+    playerStats.sleepModeActive = !wokeToday;
+    return playerStats.sleepModeActive;
 }
 
 function ensureAssignedHouseId() {
@@ -911,6 +936,7 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false) {
     const targetY = Math.round(workArea.y);
     const screenCaptureUrl = await capturePrimaryScreenDataUrl();
     const place = getPlaceById(placeId);
+    const sleeping = !!playerStats?.sleepModeActive;
 
     houseWindow = new BrowserWindow({
         width: startBounds.width,
@@ -944,7 +970,8 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false) {
             placeId: place.id,
             placeName: place.name,
             model: place.model,
-            isNew: isNewPlace ? '1' : '0'
+            isNew: isNewPlace ? '1' : '0',
+            sleeping: sleeping ? '1' : '0'
         }
     });
     houseWindow.on('closed', () => houseWindow = null);
@@ -1309,6 +1336,7 @@ ipcMain.on('google-login', async () => {
         console.log('Login successful:', currentUser.displayName);
 
         loadUserData();
+        recomputeSleepMode(new Date());
         await syncStageFloorFromServerOnLogin();
         if (loginWindow) loginWindow.close();
         createMainWindow();
@@ -1362,6 +1390,7 @@ ipcMain.on('show-main-window', () => {
 });
 
 ipcMain.handle('start-peek', () => {
+    recomputeSleepMode(new Date());
     if (characterWindow && !characterState.isReturningHome) {
         return { alreadyVisible: true };
     }
@@ -1369,6 +1398,9 @@ ipcMain.handle('start-peek', () => {
     let place;
     if (playerStats.level === 0) {
         place = getPlaceById('cradle');
+    } else if (playerStats.sleepModeActive) {
+        const assignedHouseId = ensureAssignedHouseId();
+        place = getPlaceById(assignedHouseId || 'house1');
     } else if (playerStats.awayModeActive) {
         place = pickAwayPlace();
         playerStats.awayModeActive = false;
@@ -1383,8 +1415,8 @@ ipcMain.handle('start-peek', () => {
     playerStats.discoveredPlaces = Array.from(discovered);
     saveUserData();
     const discoveredPlaces = playerStats.discoveredPlaces.map((id) => getPlaceById(id));
-    // isNew popup is now handled by the house viewer auto-erase flow
-    return { place, isNew: false, discoveredPlaces };
+    // Peek always starts with the erase overlay.
+    return { place, isNew: true, discoveredPlaces };
 });
 
 ipcMain.handle('get-places', () => {
@@ -1429,6 +1461,15 @@ ipcMain.on('toggle-character', () => {
             characterState.isReturningHome = true;
         }
     } else {
+        recomputeSleepMode(new Date());
+        if (playerStats.sleepModeActive) {
+            playerStats.awayModeActive = false;
+            saveUserData();
+            if (homeWindow) {
+                homeWindow.webContents.send('home-speech', '...');
+            }
+            return;
+        }
         if (playerStats.awayModeActive) {
             playerStats.awayModeActive = false;
             saveUserData();
@@ -1444,6 +1485,34 @@ ipcMain.on('toggle-character', () => {
             return;
         }
         createCharacterWindow();
+    }
+});
+
+ipcMain.handle('wake-up-from-sleep', async () => {
+    try {
+        if (!playerStats) return { success: false, message: '캐릭터가 없어.' };
+        const now = new Date();
+        const todayKey = toDateKey(now);
+
+        playerStats.happiness = Math.max(0, (playerStats.happiness || 0) - 10);
+        playerStats.wokeUpEarlyDate = todayKey;
+        playerStats.sleepModeActive = false;
+        characterState.isSleeping = false;
+        saveUserData();
+
+        if (!characterWindow) {
+            createCharacterWindow();
+        }
+        setTimeout(() => {
+            if (characterWindow) {
+                characterWindow.webContents.send('show-speech', '아 왜 깨워... 짜증나.');
+            }
+        }, 400);
+
+        syncCharacterToDB();
+        return { success: true };
+    } catch (err) {
+        return { success: false, message: err.message };
     }
 });
 
@@ -1780,20 +1849,15 @@ setInterval(() => {
     // 3. Visuals and Timers
     updateDynamicImage();
 
-    // Check Sleep Time (23:00 ~ 06:00)
-    // Check Sleep Time (00:00 ~ 06:00)
-    const currentHour = new Date().getHours();
-    // Midnight (00:00) to 06:00
-    const shouldSleep = (currentHour < 6);
-    if (characterState.isSleeping !== shouldSleep) {
-        characterState.isSleeping = shouldSleep;
-        console.log(`[Status] Sleep State Changed: ${shouldSleep}`);
-        updateDynamicImage(); // Update image immediately
-
-        // Say something when falling asleep
-        if (shouldSleep && characterWindow) {
-            characterWindow.webContents.send('show-speech', '아 졸려...');
+    const sleepModeActive = recomputeSleepMode(new Date());
+    if (characterState.isSleeping !== sleepModeActive) {
+        characterState.isSleeping = sleepModeActive;
+        console.log(`[Status] Sleep Mode Changed: ${sleepModeActive}`);
+        if (sleepModeActive && characterWindow && !characterState.isReturningHome) {
+            characterState.isReturningHome = true;
         }
+        updateDynamicImage();
+        saveUserData();
     }
 
     // 2. Evolution Progress (Level 1+)
@@ -2219,6 +2283,7 @@ app.whenReady().then(async () => {
     if (autoLoginSuccess) {
         // User is already logged in, go straight to main screen
         loadUserData();
+        recomputeSleepMode(new Date());
         await syncStageFloorFromServerOnLogin();
         createMainWindow();
         createTray();

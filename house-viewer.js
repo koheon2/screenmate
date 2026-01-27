@@ -5,6 +5,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const canvas = document.getElementById('house-canvas');
 const container = document.getElementById('house-container');
 const statusEl = document.getElementById('house-status');
+const electronApi = window.require ? window.require('electron') : null;
+const ipcRenderer = electronApi ? electronApi.ipcRenderer : null;
 
 const params = new URLSearchParams(window.location.search);
 const isFull = params.get('mode') === 'full';
@@ -12,6 +14,7 @@ const spriteUrl = params.get('img');
 const modelFile = params.get('model') || 'house.glb';
 const placeName = params.get('placeName') || '장소';
 const placeId = params.get('placeId') || 'house1';
+const sleepingMode = params.get('sleeping') === '1';
 const DEBUG_PLACE = true;
 const PLACEMENTS = {
     bed: { x: -0.926, y: 0.6, z: 0.344 },
@@ -147,7 +150,10 @@ let debugHour = null;
 function applyTimeOfDayLighting(hourOverride = null) {
     const hour = (hourOverride !== null && !Number.isNaN(hourOverride))
         ? hourOverride
-        : new Date().getHours() + new Date().getMinutes() / 60;
+        : (() => {
+            const now = new Date();
+            return now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+        })();
     // Map 6..18 to 0..1, clamp outside to night edges.
     const dayT = Math.min(1, Math.max(0, (hour - 6) / 12));
     const isNight = hour < 6 || hour > 18;
@@ -221,7 +227,8 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const placementPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.8);
 const placementPoint = new THREE.Vector3();
-let currentPlacement = 'floor';
+let currentPlacement = sleepingMode ? 'bed' : 'floor';
+let sleepInteractionLocked = sleepingMode;
 
 function applyPlacement(name) {
     const target = PLACEMENTS[name];
@@ -331,6 +338,31 @@ function handleDebugPlacement(event) {
 }
 
 renderer.domElement.addEventListener('pointerdown', handleDebugPlacement);
+
+function handleSleepInteraction(event) {
+    if (!sleepInteractionLocked || !characterSprite || !ipcRenderer) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(characterSprite, true);
+    if (!hits || hits.length === 0) return;
+
+    sleepInteractionLocked = false;
+    ipcRenderer.invoke('wake-up-from-sleep').then((res) => {
+        if (!res || !res.success) {
+            sleepInteractionLocked = true;
+            alert(res?.message || '깨우지 못했어.');
+            return;
+        }
+        alert('잠을 깨웠어! 행복도 -10');
+    }).catch((err) => {
+        sleepInteractionLocked = true;
+        alert(err.message);
+    });
+}
+
+renderer.domElement.addEventListener('pointerdown', handleSleepInteraction);
 
 function resize() {
     const width = container.clientWidth;
