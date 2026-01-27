@@ -11,14 +11,14 @@ const isFull = params.get('mode') === 'full';
 const spriteUrl = params.get('img');
 
 const scene = new THREE.Scene();
-scene.background = null;
+scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
 
 const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: true,
-    alpha: true,
+    alpha: false,
     powerPreference: 'high-performance'
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));

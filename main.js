@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell, desktopCapturer } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
@@ -203,7 +203,42 @@ function createHomeWindow() {
 }
 
 // ==================== HOUSE VIEWER WINDOW ====================
-function createHouseWindow() {
+async function capturePrimaryScreenDataUrl() {
+    try {
+        const primary = screen.getPrimaryDisplay();
+        const { bounds, workArea, scaleFactor } = primary;
+        const { width, height } = bounds;
+        const captureWidth = Math.max(1, Math.round(width * (scaleFactor || 1)));
+        const captureHeight = Math.max(1, Math.round(height * (scaleFactor || 1)));
+        const sources = await desktopCapturer.getSources({
+            types: ['screen'],
+            thumbnailSize: { width: captureWidth, height: captureHeight }
+        });
+        if (!sources || sources.length === 0) return '';
+        const primarySource = sources.find((s) => {
+            const displayId = s.display_id ? Number(s.display_id) : null;
+            return displayId === primary.id;
+        }) || sources[0];
+        if (!primarySource.thumbnail || primarySource.thumbnail.isEmpty()) return '';
+        const thumb = primarySource.thumbnail;
+        const thumbSize = thumb.getSize();
+        const scaleX = thumbSize.width / bounds.width;
+        const scaleY = thumbSize.height / bounds.height;
+        const cropRect = {
+            x: Math.max(0, Math.round((workArea.x - bounds.x) * scaleX)),
+            y: Math.max(0, Math.round((workArea.y - bounds.y) * scaleY)),
+            width: Math.max(1, Math.round(workArea.width * scaleX)),
+            height: Math.max(1, Math.round(workArea.height * scaleY)),
+        };
+        const cropped = thumb.crop(cropRect);
+        return cropped.toDataURL();
+    } catch (err) {
+        console.warn('Screen capture failed:', err);
+        return '';
+    }
+}
+
+async function createHouseWindow() {
     if (houseWindow) {
         houseWindow.show();
         return;
@@ -211,7 +246,7 @@ function createHouseWindow() {
 
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
-    const { width: fullWidth, height: fullHeight } = primaryDisplay.bounds;
+    const { workArea } = primaryDisplay;
 
     let startBounds = { width: 140, height: 140, x: 20, y: height - 160 };
     if (homeWindow) {
@@ -220,17 +255,18 @@ function createHouseWindow() {
         } catch (e) { }
     }
 
-    const targetWidth = Math.round(fullWidth);
-    const targetHeight = Math.round(fullHeight);
-    const targetX = 0;
-    const targetY = 0;
+    const targetWidth = Math.round(workArea.width);
+    const targetHeight = Math.round(workArea.height);
+    const targetX = Math.round(workArea.x);
+    const targetY = Math.round(workArea.y);
+    const screenCaptureUrl = await capturePrimaryScreenDataUrl();
 
     houseWindow = new BrowserWindow({
         width: startBounds.width,
         height: startBounds.height,
         x: startBounds.x,
         y: startBounds.y,
-        show: true,
+        show: false,
         frame: false,
         transparent: true,
         alwaysOnTop: true,
@@ -249,18 +285,19 @@ function createHouseWindow() {
     const imgUrl = playerStats && playerStats.characterImage
         ? pathToFileURL(playerStats.characterImage).toString()
         : '';
-    houseWindow.loadFile('house-viewer.html', { query: { mode: 'overlay', img: imgUrl } });
+    houseWindow.loadFile('house-viewer.html', {
+        query: { mode: 'overlay', img: imgUrl, screen: screenCaptureUrl }
+    });
     houseWindow.on('closed', () => houseWindow = null);
 
-    // Jump to a larger overlay (no animation)
-    setTimeout(() => {
-        if (houseWindow) {
-            houseWindow.setBounds(
-                { x: targetX, y: targetY, width: targetWidth, height: targetHeight },
-                true
-            );
-        }
-    }, 30);
+    houseWindow.webContents.on('did-finish-load', () => {
+        if (!houseWindow) return;
+        houseWindow.setBounds(
+            { x: targetX, y: targetY, width: targetWidth, height: targetHeight },
+            true
+        );
+        houseWindow.show();
+    });
 }
 
 // ==================== CHARACTER WINDOW ====================
@@ -532,6 +569,10 @@ ipcMain.on('open-house-viewer', () => {
 
 ipcMain.on('close-house-viewer', () => {
     if (houseWindow) houseWindow.close();
+});
+
+ipcMain.handle('capture-primary-screen', async () => {
+    return capturePrimaryScreenDataUrl();
 });
 
 ipcMain.on('toggle-focus-mode', (event, isFocusOn) => {
