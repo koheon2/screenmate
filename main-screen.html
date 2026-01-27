@@ -755,12 +755,7 @@
         const placesList = document.getElementById('places-list');
         const friendsModal = document.getElementById('friends-modal');
 
-        const ACHIEVEMENTS = [
-            { id: 'first-peek', title: '첫 엿보기', desc: '처음으로 엿보기를 사용했다.', unlocked: true },
-            { id: 'pet-starter', title: '입양 완료', desc: '펫을 입양하고 시작했다.', unlocked: true },
-            { id: 'wanderer', title: '방랑자', desc: '서로 다른 장소 3곳을 발견했다.', unlocked: false },
-            { id: 'night-owl', title: '올빼미', desc: '늦은 밤에도 펫을 돌봤다.', unlocked: false },
-        ];
+        let achievementsCache = [];
 
         function setFriendsTab(tab) {
             document.querySelectorAll('.friends-tab').forEach((btn) => {
@@ -834,7 +829,7 @@
                 friendsRes.data.forEach((f) => {
                     renderFriendRow(friendsSection, {
                         title: `${f.friendName} · 친밀도 ${f.intimacy}`,
-                        subtitle: `${f.friendSpecies || '친구'} / ${f.friendOwnerDisplayName || 'unknown'}`,
+                        subtitle: `${f.friendSpecies || '친구'} · 코드 ${f.friendInviteCode || '???'}`,
                         actions: [
                             {
                                 label: '메시지',
@@ -850,8 +845,42 @@
                                     if (!res.success) {
                                         alert(res.message || '메시지 전송 실패');
                                     } else {
+                                        const history = await ipcRenderer.invoke('friend-get-messages', {
+                                            friendCharacterId: f.friendCharacterId,
+                                            limit: 20
+                                        });
+                                        if (history.success) {
+                                            const lines = (history.data || []).map((m) => {
+                                                const who = m.senderCharacterId === f.friendCharacterId ? '상대' : '나';
+                                                const body = [m.messageText, m.emoteId ? `:${m.emoteId}:` : null]
+                                                    .filter(Boolean).join(' ');
+                                                return `${who}: ${body}`;
+                                            });
+                                            alert(lines.join('\n') || '메시지가 없어.');
+                                        }
                                         loadFriendsData();
                                     }
+                                }
+                            },
+                            {
+                                label: '기록',
+                                secondary: true,
+                                onClick: async () => {
+                                    const history = await ipcRenderer.invoke('friend-get-messages', {
+                                        friendCharacterId: f.friendCharacterId,
+                                        limit: 30
+                                    });
+                                    if (!history.success) {
+                                        alert(history.message || '조회 실패');
+                                        return;
+                                    }
+                                    const lines = (history.data || []).map((m) => {
+                                        const who = m.senderCharacterId === f.friendCharacterId ? '상대' : '나';
+                                        const body = [m.messageText, m.emoteId ? `:${m.emoteId}:` : null]
+                                            .filter(Boolean).join(' ');
+                                        return `${who}: ${body}`;
+                                    });
+                                    alert(lines.join('\n') || '메시지가 없어.');
                                 }
                             }
                         ]
@@ -873,8 +902,8 @@
             } else {
                 reqRes.data.forEach((r) => {
                     renderFriendRow(requestsSection, {
-                        title: `요청: ${r.requesterCharacterId.slice(0, 8)}`,
-                        subtitle: r.message,
+                        title: `요청: ${r.otherName || r.otherCharacterId?.slice(0, 8) || 'unknown'}`,
+                        subtitle: `${r.otherSpecies || '친구'} · 코드 ${r.otherInviteCode || '???'}\n${r.message}`,
                         actions: [
                             {
                                 label: '수락',
@@ -951,21 +980,40 @@
             setTimeout(() => placeToast.classList.remove('show'), 1800);
         }
 
-        function renderAchievements() {
+        function renderAchievements(items = []) {
             achievementsList.innerHTML = '';
-            ACHIEVEMENTS.forEach((a) => {
+            if (!items.length) {
+                const empty = document.createElement('div');
+                empty.className = 'achievement-desc';
+                empty.textContent = '아직 업적이 없어.';
+                achievementsList.appendChild(empty);
+                return;
+            }
+            items.forEach((a) => {
+                const unlocked = !!a.unlockedAt;
                 const item = document.createElement('div');
-                item.className = `achievement-item${a.unlocked ? '' : ' locked'}`;
+                item.className = `achievement-item${unlocked ? '' : ' locked'}`;
                 const title = document.createElement('div');
                 title.className = 'achievement-title';
-                title.textContent = `${a.unlocked ? '✅' : '🔒'} ${a.title}`;
+                const name = a.name || a.achievementId || '업적';
+                title.textContent = `${unlocked ? '✅' : '🔒'} ${name}`;
                 const desc = document.createElement('div');
                 desc.className = 'achievement-desc';
-                desc.textContent = a.desc;
+                const parts = [];
+                if (a.description) parts.push(a.description);
+                if (typeof a.progress === 'number') parts.push(`진행도 ${a.progress}`);
+                if (a.points) parts.push(`${a.points}pt`);
+                desc.textContent = parts.join(' · ') || '설명이 없어.';
                 item.appendChild(title);
                 item.appendChild(desc);
                 achievementsList.appendChild(item);
             });
+        }
+
+        async function loadAchievements() {
+            const res = await ipcRenderer.invoke('progress-get-achievements');
+            achievementsCache = res.success ? (res.data || []) : [];
+            renderAchievements(achievementsCache);
         }
 
         function renderDiscoveredPlaces(places = []) {
@@ -1177,7 +1225,7 @@
         });
 
         document.getElementById('achievements-btn-menu').addEventListener('click', () => {
-            renderAchievements();
+            loadAchievements();
             achievementsModal.style.display = 'flex';
             menuModal.style.display = 'none';
         });
@@ -1207,16 +1255,16 @@
         const placesBtn = document.getElementById('places-btn');
         if (placesBtn) {
             placesBtn.addEventListener('click', () => {
-                ipcRenderer.invoke('get-places').then((places) => {
-                    renderPlacesModal(places || []);
+                ipcRenderer.invoke('progress-get-places').then((res) => {
+                    renderPlacesModal(res.success ? (res.data || []) : []);
                     placesModal.style.display = 'flex';
                 });
             });
         }
 
         document.getElementById('places-btn-menu').addEventListener('click', () => {
-            ipcRenderer.invoke('get-places').then((places) => {
-                renderPlacesModal(places || []);
+            ipcRenderer.invoke('progress-get-places').then((res) => {
+                renderPlacesModal(res.success ? (res.data || []) : []);
                 placesModal.style.display = 'flex';
                 menuModal.style.display = 'none';
             });

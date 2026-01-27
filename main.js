@@ -66,6 +66,7 @@ let currentUser = null;
 let isGameRunning = false;
 let playerStats = null;
 let petHistory = []; // Archive for dead pets
+let bootstrapCache = null;
 // 5 minutes cooldown (Disabled for testing)
 // 5 minutes cooldown (Disabled for testing)
 const PLAY_COOLDOWN = 0;
@@ -320,6 +321,23 @@ async function apiRequest(config, isRetry = false) {
     }
 }
 
+async function getBootstrapFromDB() {
+    const data = await apiRequest({
+        method: 'GET',
+        url: `${API_BASE_URL}/sync/bootstrap`
+    });
+    bootstrapCache = data;
+    return data;
+}
+
+async function getBootstrapSafe() {
+    try {
+        return await getBootstrapFromDB();
+    } catch (e) {
+        return bootstrapCache;
+    }
+}
+
 // Update character in DB
 async function updateCharacterInDB(characterId, updates, isRetry = false) {
     try {
@@ -385,6 +403,14 @@ async function getFriends(characterId) {
     return apiRequest({
         method: 'GET',
         url: `${API_BASE_URL}/characters/${characterId}/friends`
+    });
+}
+
+async function getFriendMessages(characterId, friendCharacterId, limit = 30) {
+    return apiRequest({
+        method: 'GET',
+        url: `${API_BASE_URL}/characters/${characterId}/friends/${friendCharacterId}/messages`,
+        params: { limit }
     });
 }
 
@@ -570,6 +596,12 @@ async function getOrSyncCharacterId() {
         await syncCharacterToDB();
     }
     return playerStats.dbCharacterId || null;
+}
+
+function getCharacterDetailsMap(characters = []) {
+    const map = new Map();
+    characters.forEach((c) => map.set(c.id, c));
+    return map;
 }
 
 
@@ -1715,7 +1747,21 @@ ipcMain.handle('friend-get-requests', async (event, { direction = 'incoming', st
         const characterId = await getOrSyncCharacterId();
         if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
         const data = await getFriendRequests(characterId, direction, status);
-        return { success: true, data };
+        const bootstrap = await getBootstrapSafe();
+        const characterMap = getCharacterDetailsMap(bootstrap?.characters || []);
+
+        const enriched = data.map((r) => {
+            const otherId = direction === 'outgoing' ? r.receiverCharacterId : r.requesterCharacterId;
+            const other = characterMap.get(otherId);
+            return {
+                ...r,
+                otherCharacterId: otherId,
+                otherName: other?.name || null,
+                otherInviteCode: other?.inviteCode || null,
+                otherSpecies: other?.species || null
+            };
+        });
+        return { success: true, data: enriched };
     } catch (err) {
         return { success: false, message: err.response?.data?.message || err.message };
     }
@@ -1758,7 +1804,8 @@ ipcMain.handle('friend-get-my-character', async () => {
     try {
         const characterId = await getOrSyncCharacterId();
         if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
-        const characters = await getCharactersFromDB();
+        const bootstrap = await getBootstrapSafe();
+        const characters = bootstrap?.characters || await getCharactersFromDB();
         const me = characters.find((c) => c.id === characterId) || null;
         if (!me) return { success: false, message: '내 캐릭터를 찾지 못했어.' };
         return { success: true, data: me };
@@ -1773,6 +1820,41 @@ ipcMain.handle('friend-send-message', async (event, { friendCharacterId, message
         if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
         const data = await sendFriendMessage(characterId, friendCharacterId, messageText, emoteId);
         return { success: true, data };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('friend-get-messages', async (event, { friendCharacterId, limit = 30 }) => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
+        const data = await getFriendMessages(characterId, friendCharacterId, limit);
+        return { success: true, data };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('progress-get-achievements', async () => {
+    try {
+        const bootstrap = await getBootstrapSafe();
+        const achievements = bootstrap?.achievements || [];
+        return { success: true, data: achievements };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('progress-get-places', async () => {
+    try {
+        const bootstrap = await getBootstrapSafe();
+        const discoveredPlaces = new Set((bootstrap?.discoveredPlaces || []).map((p) => p.placeId));
+        const places = PLACES.map((place) => ({
+            ...place,
+            unlocked: discoveredPlaces.has(place.id)
+        }));
+        return { success: true, data: places };
     } catch (err) {
         return { success: false, message: err.response?.data?.message || err.message };
     }
