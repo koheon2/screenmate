@@ -1420,11 +1420,13 @@
         document.getElementById('house-btn-menu').addEventListener('click', () => {
             menuModal.style.display = 'none';
             ipcRenderer.invoke('start-peek').then((res) => {
-                if (!res || !res.place) return;
-                renderDiscoveredPlaces(res.discoveredPlaces || []);
-                if (res.isNew) {
-                    showToast(`새 장소 발견! ${res.place.name}`);
+                if (!res) return;
+                if (res.alreadyVisible) {
+                    alert('이미 화면에 있어요!');
+                    return;
                 }
+                if (!res.place) return;
+                renderDiscoveredPlaces(res.discoveredPlaces || []);
                 ipcRenderer.send('open-house-viewer', {
                     placeId: res.place.id,
                     isNew: res.isNew

@@ -99,6 +99,8 @@ const PLACES = [
     { id: 'toilet', name: '화장실', icon: '🚽', model: 'toilet.glb' },
     { id: 'cradle', name: '요람', icon: '🛏️', model: 'cradle.glb' },
 ];
+const HOUSE_IDS = PLACES.filter((p) => p.id.startsWith('house')).map((p) => p.id);
+const NON_HOUSE_PLACE_IDS = PLACES.filter((p) => !p.id.startsWith('house') && p.id !== 'cradle').map((p) => p.id);
 
 const INITIAL_STATS = {
     happiness: 50,
@@ -119,7 +121,9 @@ const INITIAL_STATS = {
     deathEventSent: false,
     loverFriendCharacterId: null,
     childBornWithFriendId: null,
-    lastSyncedStageIndex: 0
+    lastSyncedStageIndex: 0,
+    assignedHouseId: null,
+    awayModeActive: false
 };
 
 function getPlaceById(id) {
@@ -129,6 +133,25 @@ function getPlaceById(id) {
 function pickRandomPlace() {
     const idx = Math.floor(Math.random() * PLACES.length);
     return PLACES[idx];
+}
+
+function ensureAssignedHouseId() {
+    if (!playerStats) return null;
+    if (playerStats.level < 1) {
+        playerStats.assignedHouseId = null;
+        return null;
+    }
+    if (!playerStats.assignedHouseId || !HOUSE_IDS.includes(playerStats.assignedHouseId)) {
+        const idx = Math.floor(Math.random() * HOUSE_IDS.length);
+        playerStats.assignedHouseId = HOUSE_IDS[idx];
+        saveUserData();
+    }
+    return playerStats.assignedHouseId;
+}
+
+function pickAwayPlace() {
+    // For now, away mode always goes to park.
+    return getPlaceById('park');
 }
 
 function loadUserData() {
@@ -938,6 +961,7 @@ async function createHouseWindow(placeId = 'home', isNewPlace = false) {
 
 // ==================== CHARACTER WINDOW ====================
 function createCharacterWindow() {
+    playerStats.awayModeActive = false;
     // Determine spawn position
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
@@ -1338,22 +1362,40 @@ ipcMain.on('show-main-window', () => {
 });
 
 ipcMain.handle('start-peek', () => {
-    const place = pickRandomPlace();
+    if (characterWindow && !characterState.isReturningHome) {
+        return { alreadyVisible: true };
+    }
+
+    let place;
+    if (playerStats.level === 0) {
+        place = getPlaceById('cradle');
+    } else if (playerStats.awayModeActive) {
+        place = pickAwayPlace();
+        playerStats.awayModeActive = false;
+        saveUserData();
+    } else {
+        const assignedHouseId = ensureAssignedHouseId();
+        place = getPlaceById(assignedHouseId || 'house1');
+    }
+
     const discovered = new Set(playerStats.discoveredPlaces || []);
-    const isNew = !discovered.has(place.id);
     discovered.add(place.id);
     playerStats.discoveredPlaces = Array.from(discovered);
     saveUserData();
     const discoveredPlaces = playerStats.discoveredPlaces.map((id) => getPlaceById(id));
-    return { place, isNew, discoveredPlaces };
+    // isNew popup is now handled by the house viewer auto-erase flow
+    return { place, isNew: false, discoveredPlaces };
 });
 
 ipcMain.handle('get-places', () => {
-    const discovered = new Set(playerStats.discoveredPlaces || []);
-    return PLACES.map((place) => ({
-        ...place,
-        unlocked: discovered.has(place.id)
-    }));
+    if (playerStats.level === 0) {
+        const cradle = getPlaceById('cradle');
+        return [{ ...cradle, unlocked: true }];
+    }
+
+    const assignedHouseId = ensureAssignedHouseId();
+    const assignedHouse = getPlaceById(assignedHouseId || 'house1');
+    return [{ ...assignedHouse, unlocked: true }];
 });
 
 ipcMain.on('open-house-viewer', (event, payload = {}) => {
@@ -1387,6 +1429,20 @@ ipcMain.on('toggle-character', () => {
             characterState.isReturningHome = true;
         }
     } else {
+        if (playerStats.awayModeActive) {
+            playerStats.awayModeActive = false;
+            saveUserData();
+            createCharacterWindow();
+            return;
+        }
+        if (playerStats.level >= 1 && Math.random() < 0.3) {
+            playerStats.awayModeActive = true;
+            saveUserData();
+            if (homeWindow) {
+                homeWindow.webContents.send('home-speech', '...');
+            }
+            return;
+        }
         createCharacterWindow();
     }
 });
@@ -1979,13 +2035,13 @@ ipcMain.handle('progress-get-achievements', async () => {
 
 ipcMain.handle('progress-get-places', async () => {
     try {
-        const bootstrap = await getBootstrapSafe();
-        const discoveredPlaces = new Set((bootstrap?.discoveredPlaces || []).map((p) => p.placeId));
-        const places = PLACES.map((place) => ({
-            ...place,
-            unlocked: discoveredPlaces.has(place.id)
-        }));
-        return { success: true, data: places };
+        if (playerStats.level === 0) {
+            const cradle = getPlaceById('cradle');
+            return { success: true, data: [{ ...cradle, unlocked: true }] };
+        }
+        const assignedHouseId = ensureAssignedHouseId();
+        const assignedHouse = getPlaceById(assignedHouseId || 'house1');
+        return { success: true, data: [{ ...assignedHouse, unlocked: true }] };
     } catch (err) {
         return { success: false, message: err.response?.data?.message || err.message };
     }

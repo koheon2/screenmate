@@ -33,6 +33,27 @@
         .home-icon:active {
             transform: scale(0.98);
         }
+
+        .home-bubble {
+            position: absolute;
+            left: 10px;
+            top: -10px;
+            padding: 6px 8px;
+            border-radius: 12px;
+            background: #111;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 800;
+            opacity: 0;
+            transform: translateY(6px);
+            transition: all 180ms ease;
+            pointer-events: none;
+        }
+
+        .home-bubble.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
     </style>
 </head>
 
@@ -46,12 +67,20 @@
         }
     </script>
     <img src="assets/others/home_transparent.png" class="home-icon" id="home-icon" alt="Home">
+    <div class="home-bubble" id="home-bubble">...</div>
 
     <script>
         const { ipcRenderer } = require('electron');
         let clickTimeout = null;
 
         const homeIcon = document.getElementById('home-icon');
+        const homeBubble = document.getElementById('home-bubble');
+
+        function showHomeBubble(text) {
+            homeBubble.textContent = text;
+            homeBubble.classList.add('show');
+            setTimeout(() => homeBubble.classList.remove('show'), 1400);
+        }
 
         homeIcon.addEventListener('click', () => {
             if (clickTimeout) {
@@ -75,6 +104,10 @@
                 clickTimeout = null;
             }
             ipcRenderer.send('show-main-window');
+        });
+
+        ipcRenderer.on('home-speech', (event, text) => {
+            showHomeBubble(text || '...');
         });
     </script>
 </body>
