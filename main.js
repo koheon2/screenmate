@@ -134,8 +134,6 @@ function getCharacterGender(englishName) {
     if (!englishName) return 'male';
     return FEMALE_CHARACTERS.has(englishName) ? 'female' : 'male';
 }
-    'mametchi': '마메치'
-};
 
 const FEMALE_CHARACTER_NAMES = new Set([
     'marupitchi',
@@ -2629,6 +2627,7 @@ setInterval(() => {
         if (shouldSleep && characterWindow) {
             characterWindow.webContents.send('show-speech', '아 졸려...');
         }
+    }
     const sleepModeActive = recomputeSleepMode(new Date());
     if (characterState.isSleeping !== sleepModeActive) {
         characterState.isSleeping = sleepModeActive;
@@ -2873,7 +2872,6 @@ ipcMain.handle('friend-get-friends', async () => {
         if (updates.length > 0) {
             Promise.allSettled(updates);
         }
-        const data = Array.isArray(me?.friends) ? me.friends : await getFriends(characterId);
         friendsCache = Array.isArray(data) ? data : [];
         friendsCacheAt = Date.now();
 
