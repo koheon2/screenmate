@@ -388,6 +388,120 @@
             text-align: left;
         }
 
+        .friends-modal {
+            max-width: 360px;
+            text-align: left;
+        }
+
+        .friends-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin: 8px 0 10px;
+        }
+
+        .friends-tab {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 6px 8px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #f7f7f7;
+            cursor: pointer;
+            text-align: center;
+        }
+
+        .friends-tab.active {
+            background: #111;
+            color: #fff;
+            border-color: #111;
+        }
+
+        .friends-section {
+            display: none;
+            max-height: 280px;
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        .friends-section.active {
+            display: block;
+        }
+
+        .friends-invite {
+            border: 1px dashed #bbb;
+            border-radius: 10px;
+            padding: 8px 10px;
+            margin-bottom: 10px;
+            background: #fcfcfc;
+            display: grid;
+            gap: 2px;
+        }
+
+        .friends-invite-code {
+            font-size: 14px;
+            font-weight: 900;
+            letter-spacing: 0.6px;
+            color: #111;
+        }
+
+        .friends-controls {
+            display: grid;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .friends-input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+
+        .friends-row {
+            border: 1px solid #e5e5e5;
+            border-radius: 10px;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+            background: #fafafa;
+            display: grid;
+            gap: 4px;
+        }
+
+        .friends-title {
+            font-size: 13px;
+            font-weight: 800;
+            color: #222;
+        }
+
+        .friends-sub {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .friends-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 4px;
+        }
+
+        .friends-action-btn {
+            border: none;
+            border-radius: 8px;
+            padding: 6px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            background: #111;
+            color: #fff;
+        }
+
+        .friends-action-btn.secondary {
+            background: #e9e9e9;
+            color: #222;
+        }
+
         .places-list {
             max-height: 260px;
             overflow: auto;
@@ -593,12 +707,37 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="friends-modal">
+        <div class="modal friends-modal">
+            <h3>친구</h3>
+            <div class="friends-tabs">
+                <button class="friends-tab active" data-tab="friends">친구</button>
+                <button class="friends-tab" data-tab="requests">요청</button>
+                <button class="friends-tab" data-tab="search">검색</button>
+            </div>
+
+            <div class="friends-section active" id="friends-section-friends"></div>
+            <div class="friends-section" id="friends-section-requests"></div>
+            <div class="friends-section" id="friends-section-search">
+                <div class="friends-controls">
+                    <input class="friends-input" id="friend-search-input" placeholder="초대코드/이름으로 검색" />
+                    <input class="friends-input" id="friend-request-message" maxlength="200" placeholder="요청 메시지 한 줄" />
+                    <button class="friends-action-btn" id="friend-search-btn">검색</button>
+                </div>
+                <div id="friend-search-results"></div>
+            </div>
+
+            <div class="modal-close" id="close-friends">닫기</div>
+        </div>
+    </div>
+
     <!-- Menu Modal -->
     <div class="modal-overlay" id="menu-modal">
         <div class="modal">
             <h3>메뉴</h3>
             <button class="modal-btn" id="play-btn-menu" style="background: #007bff; color: white;">🎮 놀아주기</button>
             <button class="modal-btn" id="house-btn-menu" style="background: #007bff; color: white;">🏠 엿보기</button>
+            <button class="modal-btn" id="friends-btn-menu" style="background: #007bff; color: white;">👥 친구</button>
             <button class="modal-btn" id="places-btn-menu" style="background: #007bff; color: white;">🗺️ 장소</button>
             <button class="modal-btn" id="achievements-btn-menu" style="background: #007bff; color: white;">🏆
                 업적</button>
@@ -614,6 +753,7 @@
         const achievementsList = document.getElementById('achievements-list');
         const placesModal = document.getElementById('places-modal');
         const placesList = document.getElementById('places-list');
+        const friendsModal = document.getElementById('friends-modal');
 
         const ACHIEVEMENTS = [
             { id: 'first-peek', title: '첫 엿보기', desc: '처음으로 엿보기를 사용했다.', unlocked: true },
@@ -621,6 +761,189 @@
             { id: 'wanderer', title: '방랑자', desc: '서로 다른 장소 3곳을 발견했다.', unlocked: false },
             { id: 'night-owl', title: '올빼미', desc: '늦은 밤에도 펫을 돌봤다.', unlocked: false },
         ];
+
+        function setFriendsTab(tab) {
+            document.querySelectorAll('.friends-tab').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+            document.querySelectorAll('.friends-section').forEach((sec) => {
+                sec.classList.toggle('active', sec.id === `friends-section-${tab}`);
+            });
+        }
+
+        function renderFriendRow(container, { title, subtitle, actions = [] }) {
+            const row = document.createElement('div');
+            row.className = 'friends-row';
+            const t = document.createElement('div');
+            t.className = 'friends-title';
+            t.textContent = title;
+            const s = document.createElement('div');
+            s.className = 'friends-sub';
+            s.textContent = subtitle || '';
+            row.appendChild(t);
+            row.appendChild(s);
+
+            if (actions.length) {
+                const actionWrap = document.createElement('div');
+                actionWrap.className = 'friends-actions';
+                actions.forEach((a) => {
+                    const btn = document.createElement('button');
+                    btn.className = `friends-action-btn${a.secondary ? ' secondary' : ''}`;
+                    btn.textContent = a.label;
+                    btn.addEventListener('click', a.onClick);
+                    actionWrap.appendChild(btn);
+                });
+                row.appendChild(actionWrap);
+            }
+            container.appendChild(row);
+        }
+
+        async function loadFriendsData() {
+            const friendsSection = document.getElementById('friends-section-friends');
+            const requestsSection = document.getElementById('friends-section-requests');
+            friendsSection.innerHTML = '';
+            requestsSection.innerHTML = '';
+
+            const meRes = await ipcRenderer.invoke('friend-get-my-character');
+            if (meRes.success && meRes.data?.inviteCode) {
+                const inviteBox = document.createElement('div');
+                inviteBox.className = 'friends-invite';
+                const label = document.createElement('div');
+                label.className = 'friends-sub';
+                label.textContent = '내 초대코드';
+                const code = document.createElement('div');
+                code.className = 'friends-invite-code';
+                code.textContent = meRes.data.inviteCode;
+                inviteBox.appendChild(label);
+                inviteBox.appendChild(code);
+                friendsSection.appendChild(inviteBox);
+            }
+
+            const friendsRes = await ipcRenderer.invoke('friend-get-friends');
+            if (!friendsRes.success) {
+                renderFriendRow(friendsSection, {
+                    title: '친구를 불러오지 못했어',
+                    subtitle: friendsRes.message || '잠시 후 다시 시도해줘.'
+                });
+            } else if (!friendsRes.data.length) {
+                renderFriendRow(friendsSection, {
+                    title: '아직 친구가 없어',
+                    subtitle: '검색 탭에서 초대코드로 친구를 찾아봐.'
+                });
+            } else {
+                friendsRes.data.forEach((f) => {
+                    renderFriendRow(friendsSection, {
+                        title: `${f.friendName} · 친밀도 ${f.intimacy}`,
+                        subtitle: `${f.friendSpecies || '친구'} / ${f.friendOwnerDisplayName || 'unknown'}`,
+                        actions: [
+                            {
+                                label: '메시지',
+                                onClick: async () => {
+                                    const text = prompt('보낼 메시지 (선택)');
+                                    const emote = prompt('이모티콘 ID (선택)');
+                                    if (!text && !emote) return;
+                                    const res = await ipcRenderer.invoke('friend-send-message', {
+                                        friendCharacterId: f.friendCharacterId,
+                                        messageText: text || null,
+                                        emoteId: emote || null
+                                    });
+                                    if (!res.success) {
+                                        alert(res.message || '메시지 전송 실패');
+                                    } else {
+                                        loadFriendsData();
+                                    }
+                                }
+                            }
+                        ]
+                    });
+                });
+            }
+
+            const reqRes = await ipcRenderer.invoke('friend-get-requests', { direction: 'incoming', status: 'PENDING' });
+            if (!reqRes.success) {
+                renderFriendRow(requestsSection, {
+                    title: '요청을 불러오지 못했어',
+                    subtitle: reqRes.message || '잠시 후 다시 시도해줘.'
+                });
+            } else if (!reqRes.data.length) {
+                renderFriendRow(requestsSection, {
+                    title: '대기 중인 요청이 없어',
+                    subtitle: '요청이 오면 여기서 수락할 수 있어.'
+                });
+            } else {
+                reqRes.data.forEach((r) => {
+                    renderFriendRow(requestsSection, {
+                        title: `요청: ${r.requesterCharacterId.slice(0, 8)}`,
+                        subtitle: r.message,
+                        actions: [
+                            {
+                                label: '수락',
+                                onClick: async () => {
+                                    const res = await ipcRenderer.invoke('friend-accept', { requestId: r.id });
+                                    if (!res.success) alert(res.message || '수락 실패');
+                                    loadFriendsData();
+                                }
+                            },
+                            {
+                                label: '거절',
+                                secondary: true,
+                                onClick: async () => {
+                                    const res = await ipcRenderer.invoke('friend-reject', { requestId: r.id });
+                                    if (!res.success) alert(res.message || '거절 실패');
+                                    loadFriendsData();
+                                }
+                            }
+                        ]
+                    });
+                });
+            }
+        }
+
+        async function runFriendSearch() {
+            const query = document.getElementById('friend-search-input').value;
+            const message = document.getElementById('friend-request-message').value || '친구하자!';
+            const resultsWrap = document.getElementById('friend-search-results');
+            resultsWrap.innerHTML = '';
+
+            const res = await ipcRenderer.invoke('friend-search', { query });
+            if (!res.success) {
+                renderFriendRow(resultsWrap, {
+                    title: '검색 실패',
+                    subtitle: res.message || '잠시 후 다시 시도해줘.'
+                });
+                return;
+            }
+            if (!res.results.length) {
+                renderFriendRow(resultsWrap, {
+                    title: '결과가 없어',
+                    subtitle: '초대코드를 다시 확인해줘.'
+                });
+                return;
+            }
+
+            res.results.forEach((c) => {
+                renderFriendRow(resultsWrap, {
+                    title: `${c.name} (${c.inviteCode || '코드 없음'})`,
+                    subtitle: `${c.species || 'unknown'} / ${c.ownerDisplayName || 'unknown'}`,
+                    actions: [
+                        {
+                            label: '요청 보내기',
+                            onClick: async () => {
+                                const sendRes = await ipcRenderer.invoke('friend-send-request', {
+                                    targetCharacterId: c.characterId,
+                                    message
+                                });
+                                if (!sendRes.success) {
+                                    alert(sendRes.message || '요청 실패');
+                                } else {
+                                    alert('친구 요청을 보냈어!');
+                                }
+                            }
+                        }
+                    ]
+                });
+            });
+        }
 
         function showToast(message) {
             placeToast.textContent = message;
@@ -859,6 +1182,28 @@
             menuModal.style.display = 'none';
         });
 
+        document.getElementById('friends-btn-menu').addEventListener('click', async () => {
+            setFriendsTab('friends');
+            await loadFriendsData();
+            friendsModal.style.display = 'flex';
+            menuModal.style.display = 'none';
+        });
+
+        document.querySelectorAll('.friends-tab').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const tab = btn.dataset.tab;
+                setFriendsTab(tab);
+                if (tab !== 'search') {
+                    await loadFriendsData();
+                }
+            });
+        });
+
+        document.getElementById('friend-search-btn').addEventListener('click', runFriendSearch);
+        document.getElementById('friend-search-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') runFriendSearch();
+        });
+
         const placesBtn = document.getElementById('places-btn');
         if (placesBtn) {
             placesBtn.addEventListener('click', () => {
@@ -887,6 +1232,10 @@
 
         document.getElementById('close-places').addEventListener('click', () => {
             placesModal.style.display = 'none';
+        });
+
+        document.getElementById('close-friends').addEventListener('click', () => {
+            friendsModal.style.display = 'none';
         });
 
         // Listen for UI state updates from main process

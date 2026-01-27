@@ -284,6 +284,31 @@ async function getCharactersFromDB(isRetry = false) {
     }
 }
 
+// Generic API request helper with token refresh
+async function apiRequest(config, isRetry = false) {
+    try {
+        const response = await axios({
+            ...config,
+            headers: {
+                ...(config.headers || {}),
+                ...getAuthHeader()
+            }
+        });
+        return response.data;
+    } catch (err) {
+        const status = err.response?.status;
+        if ((status === 401 || status === 403) && !isRetry) {
+            console.log('[API] Token expired, attempting refresh...');
+            const refreshed = await refreshAccessToken();
+            if (refreshed) {
+                return apiRequest(config, true);
+            }
+        }
+        console.error('[API] Request failed:', err.response?.data || err.message);
+        throw err;
+    }
+}
+
 // Update character in DB
 async function updateCharacterInDB(characterId, updates, isRetry = false) {
     try {
@@ -303,6 +328,61 @@ async function updateCharacterInDB(characterId, updates, isRetry = false) {
         console.error('Failed to update character in DB:', err.response?.data || err.message);
         return null;
     }
+}
+
+// ==================== FRIEND API ====================
+async function searchCharacters(query) {
+    if (!query || !query.trim()) return [];
+    return apiRequest({
+        method: 'GET',
+        url: `${API_BASE_URL}/characters/search`,
+        params: { query: query.trim(), limit: 20 }
+    });
+}
+
+async function sendFriendRequest(characterId, targetCharacterId, message) {
+    return apiRequest({
+        method: 'POST',
+        url: `${API_BASE_URL}/characters/${characterId}/friend-requests`,
+        data: { targetCharacterId, message }
+    });
+}
+
+async function getFriendRequests(characterId, direction = 'incoming', status = 'PENDING') {
+    return apiRequest({
+        method: 'GET',
+        url: `${API_BASE_URL}/characters/${characterId}/friend-requests`,
+        params: { direction, status }
+    });
+}
+
+async function acceptFriendRequest(characterId, requestId) {
+    return apiRequest({
+        method: 'POST',
+        url: `${API_BASE_URL}/characters/${characterId}/friend-requests/${requestId}/accept`
+    });
+}
+
+async function rejectFriendRequest(characterId, requestId) {
+    return apiRequest({
+        method: 'POST',
+        url: `${API_BASE_URL}/characters/${characterId}/friend-requests/${requestId}/reject`
+    });
+}
+
+async function getFriends(characterId) {
+    return apiRequest({
+        method: 'GET',
+        url: `${API_BASE_URL}/characters/${characterId}/friends`
+    });
+}
+
+async function sendFriendMessage(characterId, friendCharacterId, messageText, emoteId) {
+    return apiRequest({
+        method: 'POST',
+        url: `${API_BASE_URL}/characters/${characterId}/friends/${friendCharacterId}/messages`,
+        data: { messageText, emoteId }
+    });
 }
 
 // Call LLM API (with optional screenshot)
@@ -459,6 +539,14 @@ async function syncCharacterToDB() {
             lastPlayedAt: playerStats.lastPlayTime ? new Date(playerStats.lastPlayTime).toISOString() : null
         });
     }
+}
+
+async function getOrSyncCharacterId() {
+    if (!playerStats) return null;
+    if (!playerStats.dbCharacterId) {
+        await syncCharacterToDB();
+    }
+    return playerStats.dbCharacterId || null;
 }
 
 
@@ -1535,6 +1623,100 @@ setInterval(async () => {
 }, 10000);
 
 // ==================== PLAY MODE & MINIGAMES ====================
+
+ipcMain.handle('get-db-character-id', async () => {
+    return getOrSyncCharacterId();
+});
+
+ipcMain.handle('friend-search', async (event, { query }) => {
+    try {
+        const results = await searchCharacters(query);
+        return { success: true, results };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('friend-send-request', async (event, { targetCharacterId, message }) => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) {
+            return { success: false, message: '캐릭터 동기화가 아직 안 됐어.' };
+        }
+        const data = await sendFriendRequest(characterId, targetCharacterId, message);
+        return { success: true, data };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('friend-get-requests', async (event, { direction = 'incoming', status = 'PENDING' } = {}) => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
+        const data = await getFriendRequests(characterId, direction, status);
+        return { success: true, data };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('friend-accept', async (event, { requestId }) => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
+        const data = await acceptFriendRequest(characterId, requestId);
+        return { success: true, data };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('friend-reject', async (event, { requestId }) => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
+        const data = await rejectFriendRequest(characterId, requestId);
+        return { success: true, data };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('friend-get-friends', async () => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
+        const data = await getFriends(characterId);
+        return { success: true, data };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('friend-get-my-character', async () => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
+        const characters = await getCharactersFromDB();
+        const me = characters.find((c) => c.id === characterId) || null;
+        if (!me) return { success: false, message: '내 캐릭터를 찾지 못했어.' };
+        return { success: true, data: me };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
+
+ipcMain.handle('friend-send-message', async (event, { friendCharacterId, messageText, emoteId }) => {
+    try {
+        const characterId = await getOrSyncCharacterId();
+        if (!characterId) return { success: false, message: '캐릭터 ID가 없어.' };
+        const data = await sendFriendMessage(characterId, friendCharacterId, messageText, emoteId);
+        return { success: true, data };
+    } catch (err) {
+        return { success: false, message: err.response?.data?.message || err.message };
+    }
+});
 
 ipcMain.handle('get-player-status', () => {
     const now = Date.now();
