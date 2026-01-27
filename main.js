@@ -93,6 +93,7 @@ const PLACES = [
     { id: 'park2', name: '공원 2', icon: '🌿', model: 'park2.glb' },
     { id: 'bakery', name: '빵집', icon: '🥐', model: 'bakery.glb' },
     { id: 'pharmacy', name: '약국', icon: '💊', model: 'pharmacy.glb' },
+    { id: 'bank', name: '은행', icon: '🏦', model: 'bank.glb' },
     { id: 'school', name: '학교', icon: '🏫', model: 'school.glb' },
     { id: 'police', name: '경찰서', icon: '🚓', model: 'police_station.glb' },
     { id: 'gym', name: '헬스장', icon: '🏋️', model: 'gym.glb' },
