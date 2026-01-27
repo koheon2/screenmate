@@ -116,6 +116,19 @@ const CHARACTER_NAMES_MAP = {
     'mametchi': '마메치'
 };
 
+const FEMALE_CHARACTER_NAMES = new Set([
+    'marupitchi',
+    'chiroritchi',
+    'peacetchi',
+    'lovelitchi',
+    'memetchi'
+]);
+
+function getGenderForCharacterName(name) {
+    if (!name) return null;
+    return FEMALE_CHARACTER_NAMES.has(name) ? 'female' : 'male';
+}
+
 function getEnglishNameFromKorean(koreanName) {
     for (const [key, value] of Object.entries(CHARACTER_NAMES_MAP)) {
         if (value === koreanName) return key;
@@ -147,6 +160,7 @@ const INITIAL_STATS = {
     awayModeActive: false,
     sleepModeActive: false,
     wokeUpEarlyDate: null,
+    gender: null,
     localUpdatedAt: 0,
     serverVersion: 0,
     serverUpdatedAt: 0
@@ -1807,8 +1821,17 @@ function evolveCharacter(targetLevel) {
             return;
         }
 
+        let candidateFolders = charFolders;
+        if (playerStats?.gender === 'female') {
+            const females = charFolders.filter((name) => getGenderForCharacterName(name) === 'female');
+            if (females.length > 0) candidateFolders = females;
+        } else if (playerStats?.gender === 'male') {
+            const males = charFolders.filter((name) => getGenderForCharacterName(name) === 'male');
+            if (males.length > 0) candidateFolders = males;
+        }
+
         // 2. Pick random folder
-        const randomCharName = charFolders[Math.floor(Math.random() * charFolders.length)];
+        const randomCharName = candidateFolders[Math.floor(Math.random() * candidateFolders.length)];
         const charDir = path.join(levelDir, randomCharName);
         console.log(`[Evolution] Selected character: ${randomCharName}`);
 
@@ -1842,6 +1865,9 @@ function evolveCharacter(targetLevel) {
             playerStats.lastEvolutionTime = Date.now();
             playerStats.characterImage = fullPath;
             playerStats.characterName = randomCharName; // Save name
+            if (!playerStats.gender) {
+                playerStats.gender = getGenderForCharacterName(randomCharName);
+            }
 
             playerStats.evolutionHistory.push({ level: targetLevel, name: randomCharName, date: Date.now() });
 
