@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>House Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: transparent;
+            overflow: hidden;
+            font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        }
+
+        #house-container {
+            position: fixed;
+            inset: 0;
+            background: transparent;
+            z-index: 30;
+            opacity: 0;
+            transform: scale(0.96);
+            transition: opacity 220ms ease, transform 260ms ease;
+        }
+
+        body.house-show #house-container {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        #house-canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        .ui {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .btn {
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            font-size: 12px;
+        }
+
+        .debug-ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            gap: 8px;
+            z-index: 15;
+        }
+
+        .debug-btn {
+            border: none;
+            padding: 8px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.9);
+            color: #111;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .hint {
+            position: fixed;
+            left: 24px;
+            bottom: 24px;
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            font-size: 12px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            z-index: 10;
+        }
+
+        .status {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 8px;
+            z-index: 10;
+        }
+
+        /* Eraser peek (captured screen) */
+        .door-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 95;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 200ms ease;
+        }
+
+        .door-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .door-overlay.cleared {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #door-canvas {
+            position: absolute;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            cursor: crosshair;
+        }
+
+        /* Curtain transition */
+        .curtain-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            --curtain-shift: 0px;
+            opacity: 1;
+            transition: opacity 240ms ease;
+            pointer-events: none;
+        }
+
+        .curtain-overlay.opened {
+            opacity: 0;
+        }
+
+        .curtain-overlay.no-anim .curtain-panel {
+            transition: none;
+        }
+
+        .curtain-panel {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 50vw;
+            background: #000;
+            transition: transform 900ms ease-in-out;
+            will-change: transform;
+        }
+
+        .curtain-left {
+            left: 0;
+            transform: translateX(calc(-1 * var(--curtain-shift)));
+        }
+
+        .curtain-right {
+            right: 0;
+            transform: translateX(var(--curtain-shift));
+        }
+    </style>
+</head>
+
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <div id="house-container">
+        <canvas id="house-canvas"></canvas>
+    </div>
+    <div class="status" id="house-status">모델 로딩 중...</div>
+    <div class="debug-ui">
+        <button class="debug-btn" id="place-bed">침대</button>
+        <button class="debug-btn" id="place-desk">책상</button>
+        <button class="debug-btn" id="place-floor">바닥</button>
+    </div>
+    <div class="ui">
+        <button class="btn" id="close-btn">닫기 (Esc)</button>
+    </div>
+    <div class="hint">드래그: 회전 · 휠: 줌</div>
+
+    <div class="door-overlay" id="door-overlay" aria-hidden="true">
+        <canvas id="door-canvas"></canvas>
+    </div>
+
+    <div class="curtain-overlay no-anim" id="curtain-overlay" aria-hidden="true">
+        <div class="curtain-panel curtain-left"></div>
+        <div class="curtain-panel curtain-right"></div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        const closeBtn = document.getElementById('close-btn');
+        const doorOverlay = document.getElementById('door-overlay');
+        const curtainOverlay = document.getElementById('curtain-overlay');
+        const params = new URLSearchParams(window.location.search);
+        const capturedScreenUrl = params.get('screen') || '';
+        const isNewPlace = params.get('isNew') === '1';
+        const placeBedBtn = document.getElementById('place-bed');
+        const placeDeskBtn = document.getElementById('place-desk');
+        const placeFloorBtn = document.getElementById('place-floor');
+
+        function closeViewer() {
+            ipcRenderer.send('close-house-viewer');
+        }
+
+        closeBtn.addEventListener('click', closeViewer);
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeViewer();
+        });
+
+        function place(name) {
+            if (typeof window.__setPlacement === 'function') {
+                window.__setPlacement(name);
+            }
+        }
+
+        placeBedBtn.addEventListener('click', () => place('bed'));
+        placeDeskBtn.addEventListener('click', () => place('desk'));
+        placeFloorBtn.addEventListener('click', () => place('floor'));
+
+        function showHouse() {
+            document.body.classList.add('house-show');
+        }
+
+        function setupEraserCanvas(dataUrl) {
+            const canvas = document.getElementById('door-canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            const brushRadius = 60;
+            let isDown = false;
+            let erasedArea = 0;
+            let cleared = false;
+
+            function drawBase() {
+                const dpr = Math.min(window.devicePixelRatio || 1, 2);
+                const w = Math.max(1, Math.floor(window.innerWidth));
+                const h = Math.max(1, Math.floor(window.innerHeight));
+                canvas.width = Math.floor(w * dpr);
+                canvas.height = Math.floor(h * dpr);
+                canvas.style.width = `${w}px`;
+                canvas.style.height = `${h}px`;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.clearRect(0, 0, w, h);
+                ctx.drawImage(img, 0, 0, w, h);
+            }
+
+            function eraseAt(x, y) {
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath();
+                ctx.arc(x, y, brushRadius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+
+                // Rough heuristic: accumulate brushed area and clear once enough is erased.
+                erasedArea += Math.PI * brushRadius * brushRadius * 0.35;
+                const screenArea = Math.max(1, window.innerWidth * window.innerHeight);
+                if (!cleared && erasedArea / screenArea > 0.7) {
+                    cleared = true;
+                    doorOverlay.classList.add('cleared');
+                }
+            }
+
+            img.onload = () => {
+                drawBase();
+            };
+            img.src = dataUrl;
+
+            window.addEventListener('resize', () => {
+                // Resize resets the mask; keep it simple and redraw the base.
+                if (img.complete) drawBase();
+            });
+
+            canvas.addEventListener('pointerdown', (e) => {
+                isDown = true;
+                eraseAt(e.clientX, e.clientY);
+                canvas.setPointerCapture(e.pointerId);
+            });
+            canvas.addEventListener('pointermove', (e) => {
+                if (!isDown) return;
+                eraseAt(e.clientX, e.clientY);
+            });
+            canvas.addEventListener('pointerup', (e) => {
+                isDown = false;
+                try {
+                    canvas.releasePointerCapture(e.pointerId);
+                } catch (err) { }
+            });
+            canvas.addEventListener('pointercancel', () => {
+                isDown = false;
+            });
+        }
+
+        async function runDoorSequence() {
+            curtainOverlay.classList.add('opened');
+            curtainOverlay.style.pointerEvents = 'none';
+            if (!isNewPlace) {
+                doorOverlay.classList.add('cleared');
+                showHouse();
+                return;
+            }
+            if (!capturedScreenUrl) {
+                // Fallback: just show the house with the soft dim transition.
+                setTimeout(showHouse, 120);
+                return;
+            }
+
+            doorOverlay.classList.add('active');
+            showHouse();
+            setupEraserCanvas(capturedScreenUrl);
+        }
+
+        // Wait for the main process to resize this window to full screen.
+        setTimeout(runDoorSequence, 350);
+    </script>
+    <script type="module" src="house-viewer.js"></script>
+</body>
+
+</html>

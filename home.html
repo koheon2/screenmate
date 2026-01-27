@@ -15,6 +15,7 @@
         body {
             background: transparent;
             overflow: hidden;
+            font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
         }
 
         .home-icon {
@@ -26,16 +27,24 @@
         }
 
         .home-icon:hover {
-            transform: scale(1.1);
+            transform: scale(1.03);
         }
 
         .home-icon:active {
-            transform: scale(0.95);
+            transform: scale(0.98);
         }
     </style>
 </head>
 
 <body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
     <img src="assets/others/home_transparent.png" class="home-icon" id="home-icon" alt="Home">
 
     <script>

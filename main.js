@@ -1,7 +1,8 @@
-const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell } = require('electron');
 require('dotenv').config();
 
+const { app, BrowserWindow, screen, Tray, Menu, nativeImage, ipcMain, shell, desktopCapturer } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { exec } = require('child_process');
 const axios = require('axios');
@@ -44,6 +45,7 @@ function getKoreanName(englishName) {
 let loginWindow = null;
 let mainWindow = null;
 let homeWindow = null;
+let houseWindow = null;
 let characterWindow = null;
 let playWindow = null;
 let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false, isSleeping: false };
@@ -68,6 +70,12 @@ function getUserDataPath() {
 const deviceDataPath = path.join(app.getPath('userData'), 'device-data.json');
 const authDataPath = path.join(app.getPath('userData'), 'auth-data.json');
 
+const PLACES = [
+    { id: 'home', name: '집', icon: '🏠', model: 'house.glb' },
+    { id: 'desk', name: '작업실', icon: '🪑', model: 'desk.glb' },
+    { id: 'park', name: '공원', icon: '🌿', model: 'park.glb' },
+    { id: 'cafe', name: '카페', icon: '☕', model: 'cafe.glb' },
+];
 
 const INITIAL_STATS = {
     happiness: 50,
@@ -81,8 +89,18 @@ const INITIAL_STATS = {
     hp: 100,
     lastFedTime: Date.now(),
     lastHungerDamageTime: Date.now(),
-    birthday: Date.now()
+    birthday: Date.now(),
+    discoveredPlaces: []
 };
+
+function getPlaceById(id) {
+    return PLACES.find((p) => p.id === id) || PLACES[0];
+}
+
+function pickRandomPlace() {
+    const idx = Math.floor(Math.random() * PLACES.length);
+    return PLACES[idx];
+}
 
 function loadUserData() {
     playerStats = { ...INITIAL_STATS };
@@ -106,6 +124,9 @@ function loadUserData() {
                 // Ensure birthday exists for migration
                 if (!playerStats.birthday) {
                     playerStats.birthday = playerStats.lastEvolutionTime || Date.now();
+                }
+                if (!Array.isArray(playerStats.discoveredPlaces)) {
+                    playerStats.discoveredPlaces = [];
                 }
 
                 console.log('Loaded user data. Active Pet:', playerStats.characterName, 'History count:', petHistory.length);
@@ -272,9 +293,6 @@ async function updateCharacterInDB(characterId, updates, isRetry = false) {
         return null;
     }
 }
-
-// Call LLM API
-const { desktopCapturer } = require('electron');
 
 // Call LLM API (with optional screenshot)
 // Call LLM API (with optional screenshot)
@@ -541,6 +559,7 @@ function createHomeWindow() {
         frame: false,
         transparent: true,
         alwaysOnTop: true,
+        visibleOnAllWorkspaces: true,
         skipTaskbar: true,
         webPreferences: {
             nodeIntegration: true,
@@ -548,8 +567,120 @@ function createHomeWindow() {
         }
     });
 
+    if (process.platform === 'darwin') {
+        homeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        homeWindow.setAlwaysOnTop(true, 'screen-saver');
+    }
+
     homeWindow.loadFile('home.html');
     homeWindow.on('closed', () => homeWindow = null);
+}
+
+// ==================== HOUSE VIEWER WINDOW ====================
+async function capturePrimaryScreenDataUrl() {
+    try {
+        const primary = screen.getPrimaryDisplay();
+        const { bounds, workArea, scaleFactor } = primary;
+        const { width, height } = bounds;
+        const captureWidth = Math.max(1, Math.round(width * (scaleFactor || 1)));
+        const captureHeight = Math.max(1, Math.round(height * (scaleFactor || 1)));
+        const sources = await desktopCapturer.getSources({
+            types: ['screen'],
+            thumbnailSize: { width: captureWidth, height: captureHeight }
+        });
+        if (!sources || sources.length === 0) return '';
+        const primarySource = sources.find((s) => {
+            const displayId = s.display_id ? Number(s.display_id) : null;
+            return displayId === primary.id;
+        }) || sources[0];
+        if (!primarySource.thumbnail || primarySource.thumbnail.isEmpty()) return '';
+        const thumb = primarySource.thumbnail;
+        const thumbSize = thumb.getSize();
+        const scaleX = thumbSize.width / bounds.width;
+        const scaleY = thumbSize.height / bounds.height;
+        const cropRect = {
+            x: Math.max(0, Math.round((workArea.x - bounds.x) * scaleX)),
+            y: Math.max(0, Math.round((workArea.y - bounds.y) * scaleY)),
+            width: Math.max(1, Math.round(workArea.width * scaleX)),
+            height: Math.max(1, Math.round(workArea.height * scaleY)),
+        };
+        const cropped = thumb.crop(cropRect);
+        return cropped.toDataURL();
+    } catch (err) {
+        console.warn('Screen capture failed:', err);
+        return '';
+    }
+}
+
+async function createHouseWindow(placeId = 'home', isNewPlace = false) {
+    if (houseWindow) {
+        houseWindow.show();
+        return;
+    }
+
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.workAreaSize;
+    const { workArea } = primaryDisplay;
+
+    let startBounds = { width: 140, height: 140, x: 20, y: height - 160 };
+    if (homeWindow) {
+        try {
+            startBounds = homeWindow.getBounds();
+        } catch (e) { }
+    }
+
+    const targetWidth = Math.round(workArea.width);
+    const targetHeight = Math.round(workArea.height);
+    const targetX = Math.round(workArea.x);
+    const targetY = Math.round(workArea.y);
+    const screenCaptureUrl = await capturePrimaryScreenDataUrl();
+    const place = getPlaceById(placeId);
+
+    houseWindow = new BrowserWindow({
+        width: startBounds.width,
+        height: startBounds.height,
+        x: startBounds.x,
+        y: startBounds.y,
+        show: false,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        backgroundColor: '#00000000',
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+        }
+    });
+
+    if (process.platform === 'darwin') {
+        houseWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        houseWindow.setAlwaysOnTop(true, 'screen-saver');
+    }
+
+    const imgUrl = playerStats && playerStats.characterImage
+        ? pathToFileURL(playerStats.characterImage).toString()
+        : '';
+    houseWindow.loadFile('house-viewer.html', {
+        query: {
+            mode: 'overlay',
+            img: imgUrl,
+            screen: screenCaptureUrl,
+            placeId: place.id,
+            placeName: place.name,
+            model: place.model,
+            isNew: isNewPlace ? '1' : '0'
+        }
+    });
+    houseWindow.on('closed', () => houseWindow = null);
+
+    houseWindow.webContents.on('did-finish-load', () => {
+        if (!houseWindow) return;
+        houseWindow.setBounds(
+            { x: targetX, y: targetY, width: targetWidth, height: targetHeight },
+            true
+        );
+        houseWindow.show();
+    });
 }
 
 // ==================== CHARACTER WINDOW ====================
@@ -915,6 +1046,7 @@ ipcMain.on('logout', () => {
     if (mainWindow) mainWindow.close();
     if (characterWindow) characterWindow.close();
     if (homeWindow) homeWindow.close();
+    if (houseWindow) houseWindow.close();
     if (tray) tray.destroy();
     if (playWindow) playWindow.close();
     createLoginWindow();
@@ -939,6 +1071,38 @@ ipcMain.on('show-main-window', () => {
             });
         }
     }
+});
+
+ipcMain.handle('start-peek', () => {
+    const place = pickRandomPlace();
+    const discovered = new Set(playerStats.discoveredPlaces || []);
+    const isNew = !discovered.has(place.id);
+    discovered.add(place.id);
+    playerStats.discoveredPlaces = Array.from(discovered);
+    saveUserData();
+    const discoveredPlaces = playerStats.discoveredPlaces.map((id) => getPlaceById(id));
+    return { place, isNew, discoveredPlaces };
+});
+
+ipcMain.on('open-house-viewer', (event, payload = {}) => {
+    if (houseWindow) {
+        houseWindow.close();
+        return;
+    }
+    if (characterWindow && !characterState.isReturningHome) {
+        characterState.isReturningHome = true;
+    }
+    const placeId = payload.placeId || 'home';
+    const isNewPlace = !!payload.isNew;
+    createHouseWindow(placeId, isNewPlace);
+});
+
+ipcMain.on('close-house-viewer', () => {
+    if (houseWindow) houseWindow.close();
+});
+
+ipcMain.handle('capture-primary-screen', async () => {
+    return capturePrimaryScreenDataUrl();
 });
 
 ipcMain.on('toggle-focus-mode', (event, isFocusOn) => {
@@ -1377,6 +1541,8 @@ ipcMain.handle('get-player-status', () => {
     // Convert to Korean name for display
     const koreanName = getKoreanName(displayName);
 
+    const discoveredPlaces = (playerStats.discoveredPlaces || []).map((id) => getPlaceById(id));
+
     return {
         happiness: playerStats.happiness,
         remainingCooldown,
@@ -1384,7 +1550,8 @@ ipcMain.handle('get-player-status', () => {
         level: playerStats.level,
         characterName: koreanName,
         evolutionProgress: playerStats.evolutionProgress || 0,
-        hp: (playerStats.hp !== undefined) ? playerStats.hp : 100
+        hp: (playerStats.hp !== undefined) ? playerStats.hp : 100,
+        discoveredPlaces
     };
 });
 
