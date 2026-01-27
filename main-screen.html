@@ -859,12 +859,19 @@
             menuModal.style.display = 'none';
         });
 
-        document.getElementById('places-btn').addEventListener('click', () => {
+        const placesBtn = document.getElementById('places-btn');
+        if (placesBtn) {
+            placesBtn.addEventListener('click', () => {
+                ipcRenderer.invoke('get-places').then((places) => {
+                    renderPlacesModal(places || []);
+                    placesModal.style.display = 'flex';
+                });
+            });
+        }
+
+        document.getElementById('places-btn-menu').addEventListener('click', () => {
             ipcRenderer.invoke('get-places').then((places) => {
                 renderPlacesModal(places || []);
-        document.getElementById('places-btn-menu').addEventListener('click', () => {
-            ipcRenderer.invoke('get-player-status').then((stats) => {
-                renderPlacesModal(stats.discoveredPlaces || []);
                 placesModal.style.display = 'flex';
                 menuModal.style.display = 'none';
             });

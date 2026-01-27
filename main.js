@@ -1561,11 +1561,15 @@ ipcMain.handle('get-player-status', () => {
     const koreanName = getKoreanName(displayName);
 
     const discoveredPlaces = (playerStats.discoveredPlaces || []).map((id) => getPlaceById(id));
+    const characterImagePath = playerStats.characterImage;
+    const characterImage = characterImagePath && fs.existsSync(characterImagePath)
+        ? pathToFileURL(characterImagePath).toString()
+        : characterImagePath;
 
     return {
         happiness: playerStats.happiness,
         remainingCooldown,
-        characterImage: playerStats.characterImage,
+        characterImage,
         level: playerStats.level,
         characterName: koreanName,
         evolutionProgress: playerStats.evolutionProgress || 0,
