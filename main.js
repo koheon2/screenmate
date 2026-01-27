@@ -14,6 +14,8 @@ const os = require('os');
 const API_BASE_URL = 'http://13.125.5.67:8080';
 const GOOGLE_CLIENT_ID = '862842547000-8vtpbvn6hea2m6ugid09t3qbvr99ph9q.apps.googleusercontent.com';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || ''; // TODO: 환경 변수로 관리하거나 비밀 키를 별도로 주입하세요
+const ENABLE_DB_SYNC = true; // Enable DB sync
+
 
 // Character name Korean mapping (English -> Korean)
 const CHARACTER_NAME_KR = {
@@ -44,7 +46,7 @@ let mainWindow = null;
 let homeWindow = null;
 let characterWindow = null;
 let playWindow = null;
-let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false };
+let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false, isSleeping: false };
 let tray = null;
 
 // User state
@@ -53,9 +55,19 @@ let isGameRunning = false;
 let playerStats = null;
 let petHistory = []; // Archive for dead pets
 // 5 minutes cooldown (Disabled for testing)
+// 5 minutes cooldown (Disabled for testing)
 const PLAY_COOLDOWN = 0;
-const userDataPath = path.join(app.getPath('userData'), 'user-data.json');
+// Dynamic user data path based on logged-in user
+function getUserDataPath() {
+    if (!currentUser || !currentUser.id) return null;
+    // Sanitize ID just in case
+    const safeId = currentUser.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return path.join(app.getPath('userData'), `user-data-${safeId}.json`);
+}
+// Common device data (shared across users on this machine)
+const deviceDataPath = path.join(app.getPath('userData'), 'device-data.json');
 const authDataPath = path.join(app.getPath('userData'), 'auth-data.json');
+
 
 const INITIAL_STATS = {
     happiness: 50,
@@ -77,8 +89,10 @@ function loadUserData() {
     petHistory = [];
 
     try {
-        if (fs.existsSync(userDataPath)) {
-            const fileData = JSON.parse(fs.readFileSync(userDataPath, 'utf8'));
+
+        const dataPath = getUserDataPath();
+        if (dataPath && fs.existsSync(dataPath)) {
+            const fileData = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
             if (fileData) {
                 if (fileData.activePet) {
                     // New nested format
@@ -108,8 +122,11 @@ function saveUserData() {
             activePet: playerStats,
             petHistory: petHistory
         };
-        fs.writeFileSync(userDataPath, JSON.stringify(dataToSave, null, 2), 'utf8');
-        console.log('Saved user data (including history)');
+        const dataPath = getUserDataPath();
+        if (dataPath) {
+            fs.writeFileSync(dataPath, JSON.stringify(dataToSave, null, 2), 'utf8');
+            console.log(`Saved user data for ${currentUser.displayName} (including history)`);
+        }
     } catch (e) {
         console.error('Failed to save user data:', e);
     }
@@ -368,7 +385,14 @@ async function callLlmApi(characterId, userMessage, context, screenshotBuffer, i
 
 // Sync local character to DB
 async function syncCharacterToDB() {
+    if (!ENABLE_DB_SYNC) return;
     if (!playerStats || !global.authTokens) return;
+
+    // Only sync if character is born (Level > 0)
+    if (playerStats.level === 0 || !playerStats.characterName) {
+        // console.log('[DB Sync] Character not born yet (Egg). Skipping...');
+        return;
+    }
 
     // Check if we already have a characterId stored
     if (!playerStats.dbCharacterId) {
@@ -381,9 +405,12 @@ async function syncCharacterToDB() {
             console.log('Linked to existing DB character:', aliveChar.id);
         } else {
             // Create new character
+            // Use Korean name for name, but hardcode species to '고양이' (Cat) to avoid backend 500 error
+            // It seems backend only accepts specific species enum or existing values.
+            const koreanName = getKoreanName(playerStats.characterName);
             const newChar = await createCharacterInDB(
-                getKoreanName(playerStats.characterName) || '새 친구',
-                playerStats.characterName || 'unknown',
+                koreanName || '새 친구',
+                '고양이', // species (Fixed to valid value)
                 '다마고치 스타일 캐릭터'
             );
             if (newChar) {
@@ -649,7 +676,7 @@ function createCharacterWindow() {
                 // Just stay in place (or maybe wobble slightly?)
                 // For now, static as requested.
             }
-            else if (characterState.isFocusMode && homeWindow) {
+            else if ((characterState.isFocusMode || characterState.isSleeping) && homeWindow) {
                 // ... (Focus Mode Logic)
                 try {
                     const homeBounds = homeWindow.getBounds();
@@ -749,8 +776,8 @@ function sha256(buffer) {
 function getDeviceId() {
     let devId = null;
     try {
-        if (fs.existsSync(userDataPath)) {
-            const data = JSON.parse(fs.readFileSync(userDataPath, 'utf8'));
+        if (fs.existsSync(deviceDataPath)) {
+            const data = JSON.parse(fs.readFileSync(deviceDataPath, 'utf8'));
             devId = data.deviceId;
         }
     } catch (e) { }
@@ -760,11 +787,11 @@ function getDeviceId() {
         // Save deviceId immediately so it's persisted
         try {
             let data = {};
-            if (fs.existsSync(userDataPath)) {
-                data = JSON.parse(fs.readFileSync(userDataPath, 'utf8'));
+            if (fs.existsSync(deviceDataPath)) {
+                data = JSON.parse(fs.readFileSync(deviceDataPath, 'utf8'));
             }
             data.deviceId = devId;
-            fs.writeFileSync(userDataPath, JSON.stringify(data, null, 2), 'utf8');
+            fs.writeFileSync(deviceDataPath, JSON.stringify(data, null, 2), 'utf8');
         } catch (e) {
             console.error('Failed to save deviceId:', e);
         }
@@ -881,6 +908,8 @@ ipcMain.on('google-login', async () => {
 ipcMain.on('logout', () => {
     currentUser = null;
     isGameRunning = false;
+    playerStats = null; // Clear stats
+    petHistory = [];    // Clear history
     global.authTokens = null;
     clearAuthData(); // Clear saved auth data
     if (mainWindow) mainWindow.close();
@@ -1100,6 +1129,19 @@ function updateDynamicImage() {
     if (playerStats.level === 0 || !playerStats.characterName) return;
 
     const baseDir = path.join(__dirname, 'assets', `level${playerStats.level}`, playerStats.characterName);
+
+    // Sleep Override
+    if (characterState.isSleeping) {
+        const sleepPath = path.join(baseDir, 'sleeping.webp');
+        if (fs.existsSync(sleepPath)) {
+            if (playerStats.characterImage !== sleepPath) {
+                playerStats.characterImage = sleepPath;
+                if (characterWindow) characterWindow.webContents.send('update-image', sleepPath);
+                if (mainWindow) mainWindow.webContents.send('update-image', sleepPath);
+            }
+            return;
+        }
+    }
     const h = playerStats.happiness;
     let candidates = [];
 
@@ -1156,6 +1198,9 @@ function updateDynamicImage() {
 // Check evolution progress and decrease happiness periodically
 setInterval(() => {
     // 0. Ensure Home Window always exists if game is running
+
+    if (!playerStats) return;
+
     if (isGameRunning && !homeWindow) {
         console.log('[Watchdog] Home icon missing. Recreating...');
         createHomeWindow();
@@ -1211,6 +1256,16 @@ setInterval(() => {
         handleDeath();
     }
 
+    // Check Sleep Time (23:00 ~ 06:00)
+    // Check Sleep Time (Testing: 15:00 ~ 06:00)
+    const currentHour = new Date().getHours();
+    const shouldSleep = (currentHour >= 15 || currentHour < 6);
+    if (characterState.isSleeping !== shouldSleep) {
+        characterState.isSleeping = shouldSleep;
+        console.log(`[Status] Sleep State Changed: ${shouldSleep}`);
+        updateDynamicImage(); // Update image immediately
+    }
+
     // 2. Evolution Progress (Level 1+)
     if (playerStats.level > 0 && playerStats.level < 3 && playerStats.hp > 0) {
         // Normal speed: 1% per minute
@@ -1227,7 +1282,7 @@ setInterval(() => {
     }
 
     saveUserData();
-}, 60000); // Check every 1 minute
+}, 3000); // Check every 3 seconds (Testing)
 
 // LLM speech bubble timer (every 10 seconds)
 setInterval(async () => {
