@@ -102,6 +102,27 @@ const PLACES = [
 const HOUSE_IDS = PLACES.filter((p) => p.id.startsWith('house')).map((p) => p.id);
 const NON_HOUSE_PLACE_IDS = PLACES.filter((p) => !p.id.startsWith('house') && p.id !== 'cradle').map((p) => p.id);
 
+/* CHARACTER MAPPING */
+const CHARACTER_NAMES_MAP = {
+    'marupitchi': '마루피치',
+    'young-mametchi': '영마메치',
+    'kuchipatchi': '쿠치파치',
+    'memetchi': '메메치',
+    'lovelitchi': '러블리치',
+    'kuromametchi': '쿠로마메치',
+    'ichigotchi': '이치고치',
+    'gozarutchi': '고자루치',
+    'kikitchi': '키키치',
+    'mametchi': '마메치'
+};
+
+function getEnglishNameFromKorean(koreanName) {
+    for (const [key, value] of Object.entries(CHARACTER_NAMES_MAP)) {
+        if (value === koreanName) return key;
+    }
+    return null;
+}
+
 const INITIAL_STATS = {
     happiness: 50,
     lastPlayTime: 0,
@@ -419,23 +440,71 @@ async function getCharacterEventsFromDB(characterId, limit = 30) {
     }
 }
 
-async function syncStageFloorFromServerOnLogin() {
+async function syncFullStateFromDB() {
     try {
-        if (!global.authTokens || !playerStats?.dbCharacterId) {
-            playerStats.lastSyncedStageIndex = playerStats?.level || 0;
-            return;
-        }
+        if (!global.authTokens) return;
+
+        // Fetch latest data from DB
         const bootstrap = await getBootstrapSafe();
         const characters = bootstrap?.characters || [];
-        const me = characters.find((c) => c.id === playerStats.dbCharacterId);
-        if (me && typeof me.stageIndex === 'number') {
-            playerStats.lastSyncedStageIndex = me.stageIndex;
-        } else {
-            playerStats.lastSyncedStageIndex = playerStats.level || 0;
+
+        // Find my character
+        let me = null;
+        if (playerStats?.dbCharacterId) {
+            me = characters.find((c) => c.id === playerStats.dbCharacterId);
         }
+
+        // If not found by ID (new device), find by logic
+        if (!me) {
+            me = characters.find((c) => c.isAlive) || characters[0];
+            if (me) {
+                console.log(`[Sync] Relinking to DB character: ${me.id}`);
+                playerStats.dbCharacterId = me.id;
+            }
+        }
+
+        if (!me) {
+            console.log('[Sync] No character found in DB.');
+            return;
+        }
+
+        console.log(`[Sync] Syncing stats for ${me.name}...`);
+
+        // Sync Stats
+        if (typeof me.stageIndex === 'number') playerStats.level = me.stageIndex;
+        if (typeof me.happiness === 'number') playerStats.happiness = me.happiness;
+        if (typeof me.health === 'number') playerStats.hp = me.health;
+        if (me.lastFedAt) playerStats.lastFedTime = new Date(me.lastFedAt).getTime();
+        if (me.lastPlayedAt) playerStats.lastPlayTime = new Date(me.lastPlayedAt).getTime();
+
+        // Restore English Name & Image Path (For new device / missing local data)
+        if (!playerStats.characterName && me.name) {
+            const engName = getEnglishNameFromKorean(me.name);
+            if (engName) {
+                playerStats.characterName = engName;
+                console.log(`[Sync] Restored character name: ${engName}`);
+
+                // Restore Image Path
+                if (me.stageIndex === 0) {
+                    playerStats.characterImage = path.join(__dirname, 'assets/level0/level0.png');
+                } else {
+                    const paths = [
+                        path.join(__dirname, 'assets', `level${me.stageIndex}`, engName, 'normal.webp'),
+                        path.join(__dirname, 'assets', `level${me.stageIndex}`, engName, 'normal.png')
+                    ];
+                    const validPath = paths.find(p => fs.existsSync(p));
+                    if (validPath) {
+                        playerStats.characterImage = validPath;
+                    }
+                }
+            }
+        }
+
+        playerStats.lastSyncedStageIndex = playerStats.level;
         saveUserData();
+        console.log('[Sync] Complete.');
     } catch (e) {
-        playerStats.lastSyncedStageIndex = playerStats?.level || 0;
+        console.error('[Sync] Failed:', e);
     }
 }
 
@@ -1309,7 +1378,7 @@ ipcMain.on('google-login', async () => {
         console.log('Login successful:', currentUser.displayName);
 
         loadUserData();
-        await syncStageFloorFromServerOnLogin();
+        await syncFullStateFromDB();
         if (loginWindow) loginWindow.close();
         createMainWindow();
         createTray();
@@ -2219,7 +2288,7 @@ app.whenReady().then(async () => {
     if (autoLoginSuccess) {
         // User is already logged in, go straight to main screen
         loadUserData();
-        await syncStageFloorFromServerOnLogin();
+        await syncFullStateFromDB();
         createMainWindow();
         createTray();
     } else {
