@@ -54,13 +54,14 @@ ipcRenderer.on('init-game', (event, { mode, startPos, characterImage, partner })
         partnerState.x = window.innerWidth / 2 + 20;
         partnerState.y = window.innerHeight / 2;
 
-        // Force Mametchi for testing per request
-        partnerImg.src = 'assets/level3/mametchi/normal.webp';
-
-        // Callback if webp fails
-        partnerImg.onerror = () => {
-            partnerImg.src = 'assets/level3/mametchi/normal.png';
-        };
+        if (partner?.partnerImage) {
+            partnerImg.src = partner.partnerImage;
+            partnerImg.onerror = () => {
+                partnerImg.src = 'assets/level3/mametchi/normal.webp';
+            };
+        } else {
+            partnerImg.src = 'assets/level3/mametchi/normal.webp';
+        }
 
         partnerImg.style.display = 'block';
         character.style.display = 'block';

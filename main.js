@@ -1990,6 +1990,14 @@ function resolveBreedingPartnerImageUrl(partner) {
     return pathToFileURL(partnerPath).toString();
 }
 
+function resolveBreedingPartnerNormalImageUrl(partner) {
+    const partnerName = partner?.friendName || '';
+    const partnerPath =
+        resolveSpritePathFor(partnerName, 3, 'normal.webp') ||
+        path.join(__dirname, 'assets/level3/mametchi/normal.webp');
+    return pathToFileURL(partnerPath).toString();
+}
+
 async function createHouseWindow(
     placeId = 'home',
     isNewPlace = false,
@@ -4245,7 +4253,10 @@ function createPlayWindow(mode) {
             mode,
             startPos,
             characterImage: playerStats.characterImage,
-            partner: playerStats.breedingPartner
+            partner: {
+                ...playerStats.breedingPartner,
+                partnerImage: resolveBreedingPartnerNormalImageUrl(playerStats.breedingPartner)
+            }
         });
     });
     playWindow.on('closed', () => {
