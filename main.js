@@ -67,6 +67,7 @@ let tray = null;
 let currentUser = null;
 let isGameRunning = false;
 let playerStats = null;
+const DEFAULT_CAFE_CHANCE = 0.1;
 let petHistory = []; // Archive for dead pets
 let bootstrapCache = null;
 let friendsCache = [];
@@ -202,6 +203,8 @@ const INITIAL_STATS = {
     forcedAwayMeta: null,
     pendingPoliceAfterBank: false,
     cafePending: false,
+    cafeChance: DEFAULT_CAFE_CHANCE,
+    debugTimeOffsetHours: 0,
     schoolLastDate: null,
     park2UsedFriendIds: [],
     achievements: {},
@@ -234,10 +237,11 @@ function toDateKey(date) {
     return `${y}-${m}-${d}`;
 }
 
-function recomputeSleepMode(now = new Date()) {
+function recomputeSleepMode(now = null) {
     if (!playerStats) return false;
-    const sleepHours = now.getHours() < 6;
-    const todayKey = toDateKey(now);
+    const current = now || getGameNow();
+    const sleepHours = current.getHours() < 6;
+    const todayKey = toDateKey(current);
 
     if (!sleepHours) {
         playerStats.sleepModeActive = false;
@@ -347,7 +351,7 @@ function resolvePlacementForView(placeId) {
     if (!placeId) return null;
     const isHouse = placeId.startsWith('house');
     if (isHouse) {
-        const hour = new Date().getHours();
+        const hour = getGameNow().getHours();
         const label = hour < 6 ? '침대' : '의자';
         const labeled = getPlacementByLabel(placeId, label);
         if (labeled) return labeled;
@@ -382,6 +386,11 @@ function markAchievement(key, label) {
     };
     recordCharacterEvent('MILESTONE', `업적 달성: ${label}`, { achievementKey: key });
     upsertAchievementInDB(key, label);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('achievement-toast', {
+            label: label || key
+        });
+    }
 }
 
 function clearForcedAway() {
@@ -409,11 +418,18 @@ function setForcedAway(placeId, reason, meta = null) {
     }
 }
 
-function isWeekdaySchoolHours(now = new Date()) {
-    const day = now.getDay();
-    const hour = now.getHours();
+function isWeekdaySchoolHours(now = null) {
+    const current = now || getGameNow();
+    const day = current.getDay();
+    const hour = current.getHours();
     const weekday = day >= 1 && day <= 5;
     return weekday && hour >= 9 && hour < 17;
+}
+
+function getGameNow() {
+    const offsetHours = Number(playerStats?.debugTimeOffsetHours || 0);
+    const offsetMs = offsetHours * 60 * 60 * 1000;
+    return new Date(Date.now() + offsetMs);
 }
 
 function isCharacterVisibleOut() {
@@ -452,7 +468,7 @@ function getEligiblePark2FriendId() {
 function maybeTriggerSchoolVisit() {
     if (!playerStats || playerStats.level !== 2) return false;
     if (!isWeekdaySchoolHours()) return false;
-    const today = toDateKey(new Date());
+    const today = toDateKey(getGameNow());
     if (playerStats.schoolLastDate === today) return false;
     setForcedAway('school', 'SCHOOL');
     return true;
@@ -496,7 +512,7 @@ function resolveForcedAwayOnPeek(placeId) {
     if (!playerStats?.forcedAwayReason) return;
     const reason = playerStats.forcedAwayReason;
     const meta = playerStats.forcedAwayMeta || {};
-    const today = toDateKey(new Date());
+    const today = toDateKey(getGameNow());
 
     if (reason === 'PAYDAY_BANK' && placeId === 'bank') {
         markAchievement('payday', '페이데이');
@@ -561,6 +577,8 @@ function loadUserData() {
                 }
                 playerStats.achievements = playerStats.achievements || {};
                 playerStats.feedCount = playerStats.feedCount || 0;
+                playerStats.cafeChance = typeof playerStats.cafeChance === 'number' ? playerStats.cafeChance : DEFAULT_CAFE_CHANCE;
+                playerStats.debugTimeOffsetHours = Number.isFinite(playerStats.debugTimeOffsetHours) ? playerStats.debugTimeOffsetHours : 0;
                 playerStats.visibleAccumMillis = playerStats.visibleAccumMillis || 0;
                 playerStats.visibleLastTickAt = playerStats.visibleLastTickAt || 0;
                 playerStats.placePlacements = playerStats.placePlacements || {};
@@ -1504,6 +1522,29 @@ ipcMain.handle('debug-adjust-stat', async (event, payload = {}) => {
             maybeEvolveFromProgress();
             break;
         }
+        case 'feedCount': {
+            const current = Number(playerStats.feedCount) || 0;
+            playerStats.feedCount = Math.max(0, current + delta);
+            break;
+        }
+        case 'visibleMinutes': {
+            const current = Number(playerStats.visibleAccumMillis) || 0;
+            const next = Math.max(0, current + delta * 60 * 1000);
+            playerStats.visibleAccumMillis = next;
+            break;
+        }
+        case 'cafeChance': {
+            const current = Number(playerStats.cafeChance) || 0;
+            const next = Math.max(0, Math.min(1, current + delta));
+            playerStats.cafeChance = next;
+            break;
+        }
+        case 'timeOffsetHours': {
+            const current = Number(playerStats.debugTimeOffsetHours) || 0;
+            const next = Math.max(-23, Math.min(23, current + delta));
+            playerStats.debugTimeOffsetHours = next;
+            break;
+        }
         default:
             return { success: false, message: '알 수 없는 항목이야.' };
     }
@@ -1692,7 +1733,7 @@ async function createHouseWindow(
     const place = getPlaceById(placeId);
     const placementData = resolvePlacementForView(place.id);
     const placementName = normalizePlacePlacement(place.id)?.customName;
-    const isNightHours = new Date().getHours() < 6;
+    const isNightHours = getGameNow().getHours() < 6;
     const sleeping = isNightHours;
     const isBreedingKissing = breedingStage === BREEDING_STAGES.KISSING;
     const debugPlacement = breedingStage === 'DEBUG';
@@ -1724,16 +1765,27 @@ async function createHouseWindow(
             resolveSpritePathFor(playerStats.characterName, 3, 'kissing.webp') ||
             resolveSpritePathFor(playerStats.characterName, 3, 'normal.webp');
         if (kissingPath) spritePath = kissingPath;
-    } else if (place.id === 'park2') {
-        const happyPath =
-            resolveSpritePathFor(playerStats.characterName, 3, 'happy.webp') ||
-            resolveSpritePathFor(playerStats.characterName, 3, 'normal.webp');
-        if (happyPath) spritePath = happyPath;
     } else if (sleeping) {
         const sleepPath =
             resolveSpritePathFor(playerStats.characterName, playerStats.level || 1, 'sleeping.webp') ||
             resolveSpritePathFor(playerStats.characterName, playerStats.level || 1, 'normal.webp');
         if (sleepPath) spritePath = sleepPath;
+    } else {
+        const placeEmotionMap = {
+            bank: 'happy',
+            police: 'sad',
+            cafe: 'happy',
+            school: 'boring',
+            toilet: 'happy',
+            park2: 'happy'
+        };
+        const emotion = placeEmotionMap[place.id];
+        if (emotion) {
+            const emotionPath =
+                resolveSpritePathFor(playerStats.characterName, playerStats.level || 1, `${emotion}.webp`) ||
+                resolveSpritePathFor(playerStats.characterName, playerStats.level || 1, 'normal.webp');
+            if (emotionPath) spritePath = emotionPath;
+        }
     }
     const imgUrl = spritePath ? pathToFileURL(spritePath).toString() : '';
     const partnerImgUrl = isBreedingKissing ? resolveBreedingPartnerImageUrl(breedingPartner) : '';
@@ -1776,7 +1828,8 @@ async function createHouseWindow(
             companionImg: companionImgUrl,
             companionX: companionPlacement?.x ?? '',
             companionY: companionPlacement?.y ?? '',
-            companionZ: companionPlacement?.z ?? ''
+            companionZ: companionPlacement?.z ?? '',
+            timeOffsetHours: String(playerStats?.debugTimeOffsetHours ?? 0)
         }
     });
     houseWindow.on('closed', () => houseWindow = null);
@@ -2262,7 +2315,7 @@ ipcMain.on('show-main-window', () => {
 });
 
 ipcMain.handle('start-peek', () => {
-    recomputeSleepMode(new Date());
+    recomputeSleepMode(getGameNow());
 
     if (isBreedingActive()) {
         let placeId = 'school';
@@ -2982,7 +3035,7 @@ setInterval(() => {
 
     // Check Sleep Time (23:00 ~ 06:00)
     // Check Sleep Time (00:00 ~ 06:00)
-    const currentHour = new Date().getHours();
+    const currentHour = getGameNow().getHours();
     // Midnight (00:00) to 06:00
     const shouldSleep = (currentHour < 6);
     if (characterState.isSleeping !== shouldSleep) {
@@ -2995,7 +3048,7 @@ setInterval(() => {
             characterWindow.webContents.send('show-speech', '아 졸려...');
         }
     }
-    const sleepModeActive = recomputeSleepMode(new Date());
+    const sleepModeActive = recomputeSleepMode(getGameNow());
     if (characterState.isSleeping !== sleepModeActive) {
         characterState.isSleeping = sleepModeActive;
         console.log(`[Status] Sleep Mode Changed: ${sleepModeActive}`);
@@ -3341,8 +3394,27 @@ ipcMain.handle('friend-get-messages', async (event, { friendCharacterId, limit =
 
 ipcMain.handle('progress-get-achievements', async () => {
     try {
-        const bootstrap = await getBootstrapSafe();
-        const achievements = Array.isArray(bootstrap?.achievements) ? bootstrap.achievements : [];
+        const [definitions, unlocked] = await Promise.all([
+            apiRequest({ method: 'GET', url: `${API_BASE_URL}/users/me/achievements/definitions` }),
+            apiRequest({ method: 'GET', url: `${API_BASE_URL}/users/me/achievements` })
+        ]);
+
+        const unlockedList = Array.isArray(unlocked) ? unlocked : [];
+        const unlockedById = new Map(unlockedList.map((a) => [a.achievementId, a]));
+        const defList = Array.isArray(definitions) ? definitions : [];
+
+        const achievements = defList.map((def) => {
+            const existing = unlockedById.get(def.achievementId);
+            if (existing) {
+                return { ...def, ...existing };
+            }
+            return {
+                ...def,
+                unlockedAt: null,
+                progress: 0
+            };
+        });
+
         const byId = new Map(achievements.map((a) => [a.achievementId, a]));
         const local = playerStats?.achievements || {};
         Object.entries(local).forEach(([achievementId, info]) => {
@@ -3365,17 +3437,33 @@ ipcMain.handle('progress-get-achievements', async () => {
 
 ipcMain.handle('progress-get-places', async () => {
     try {
-        if (playerStats.level === 0) {
-            const cradle = getPlaceById('cradle');
-            return { success: true, data: [{ ...cradle, unlocked: true }] };
-        }
+        const [definitions, discovered] = await Promise.all([
+            apiRequest({ method: 'GET', url: `${API_BASE_URL}/users/me/places/definitions` }),
+            apiRequest({ method: 'GET', url: `${API_BASE_URL}/users/me/places` })
+        ]);
+
+        const discoveredList = Array.isArray(discovered) ? discovered : [];
+        const discoveredIds = new Set(discoveredList.map((d) => d.placeId));
+        const localDiscovered = Array.isArray(playerStats?.discoveredPlaces) ? playerStats.discoveredPlaces : [];
+        localDiscovered.forEach((id) => discoveredIds.add(id));
+
         const assignedHouseId = ensureAssignedHouseId();
-        const discoveredIds = new Set(playerStats.discoveredPlaces || []);
         if (assignedHouseId) discoveredIds.add(assignedHouseId);
-        const places = Array.from(discoveredIds)
-            .map((id) => getPlaceById(id))
-            .filter((p) => p && p.id !== 'cradle')
-            .map((p) => ({ ...p, unlocked: true }));
+
+        const defList = Array.isArray(definitions) ? definitions : [];
+        const places = defList.map((def) => {
+            const local = getPlaceById(def.placeId);
+            return {
+                id: def.placeId,
+                name: def.name,
+                region: def.region,
+                rarity: def.rarity,
+                icon: local?.icon,
+                model: local?.model,
+                unlocked: discoveredIds.has(def.placeId)
+            };
+        });
+
         return { success: true, data: places };
     } catch (err) {
         return { success: false, message: err.response?.data?.message || err.message };
@@ -3437,6 +3525,10 @@ ipcMain.handle('get-player-status', () => {
         dbCharacterId: playerStats.dbCharacterId || null,
         characterName: koreanName,
         intimacyScore: playerStats.intimacyScore ?? 0,
+        feedCount: playerStats.feedCount || 0,
+        visibleMinutes: Math.floor((playerStats.visibleAccumMillis || 0) / 60000),
+        cafeChance: typeof playerStats.cafeChance === 'number' ? playerStats.cafeChance : DEFAULT_CAFE_CHANCE,
+        timeOffsetHours: playerStats.debugTimeOffsetHours || 0,
         evolutionProgress: playerStats.evolutionProgress || 0,
         hp: (playerStats.hp !== undefined) ? playerStats.hp : 100,
         discoveredPlaces
@@ -3474,7 +3566,8 @@ ipcMain.handle('finish-play-mode', (event, mode) => {
         playerStats.lastFedTime = Date.now();
         playerStats.lastHungerDamageTime = Date.now();
         playerStats.feedCount = (playerStats.feedCount || 0) + 1;
-        if (playerStats.level >= 2 && Math.random() < 0.1) {
+        const chance = typeof playerStats.cafeChance === 'number' ? playerStats.cafeChance : DEFAULT_CAFE_CHANCE;
+        if (playerStats.level >= 2 && Math.random() < chance) {
             playerStats.cafePending = true;
         }
         // Optional: Recover some HP when fed?

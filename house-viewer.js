@@ -40,6 +40,7 @@ const placementOverride = {
 const placementModelY = params.get('placementModelY');
 const hasPlacementOverride = Object.values(placementOverride).every((v) => v !== null && v !== '');
 const hasModelYOverride = placementModelY !== null && placementModelY !== '';
+const timeOffsetHours = Number(params.get('timeOffsetHours') || '0');
 
 console.log('[HouseViewer] breedingStage:', breedingStage, 'partnerName:', partnerName);
 
@@ -181,12 +182,15 @@ scene.add(ground);
 let debugHour = null;
 
 function applyTimeOfDayLighting(hourOverride = null) {
+    const baseHour = (() => {
+        const now = new Date();
+        const offsetMs = timeOffsetHours * 60 * 60 * 1000;
+        const adjusted = new Date(now.getTime() + offsetMs);
+        return adjusted.getHours() + adjusted.getMinutes() / 60 + adjusted.getSeconds() / 3600;
+    })();
     const hour = (hourOverride !== null && !Number.isNaN(hourOverride))
         ? hourOverride
-        : (() => {
-            const now = new Date();
-            return now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
-        })();
+        : baseHour;
     // Map 6..18 to 0..1, clamp outside to night edges.
     const dayT = Math.min(1, Math.max(0, (hour - 6) / 12));
     const isNight = hour < 6 || hour > 18;
@@ -267,6 +271,7 @@ let sleepInteractionLocked = sleepingMode && !eggInteractionMode;
 let manualPlacement = null;
 let modelYOffset = 0;
 let cameraOnlyMode = false;
+let bubbleTimeout = null;
 
 if (hasPlacementOverride) {
     manualPlacement = {
@@ -533,6 +538,46 @@ function handleSleepInteraction(event) {
 }
 
 renderer.domElement.addEventListener('pointerdown', handleSleepInteraction);
+
+function showSpeech(text) {
+    const bubble = document.getElementById('speech-bubble');
+    if (!bubble) return;
+    bubble.textContent = text;
+    bubble.style.opacity = '1';
+    if (bubbleTimeout) clearTimeout(bubbleTimeout);
+    bubbleTimeout = setTimeout(() => {
+        bubble.style.opacity = '0';
+    }, 2200);
+}
+
+function handlePlaceSpeechInteraction(event) {
+    if (!characterSprite || !ipcRenderer) return;
+    if (sleepingMode) return;
+    if (debugPlacement) return;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(characterSprite, true);
+    if (!hits || hits.length === 0) return;
+
+    if (placeId === 'bank') {
+        showSpeech('널 위해 돈을 가져다줄게!!!');
+        return;
+    }
+    if (placeId === 'police') {
+        showSpeech('잘못했어요~ㅠㅠ');
+        return;
+    }
+    if (placeId.startsWith('house')) {
+        const houseLines = ['나랑 놀고 싶어?', '지금 공부중이야!'];
+        const line = houseLines[Math.floor(Math.random() * houseLines.length)];
+        showSpeech(line);
+    }
+}
+
+renderer.domElement.addEventListener('pointerdown', handlePlaceSpeechInteraction);
 
 function resize() {
     const width = container.clientWidth;

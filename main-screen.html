@@ -955,6 +955,30 @@
             <span class="debug-value" id="debug-evo">0</span>
             <button class="debug-btn" data-delta="10">▶</button>
         </div>
+        <div class="debug-row" data-key="timeOffsetHours">
+            <span>시간</span>
+            <button class="debug-btn" data-delta="-1">◀</button>
+            <span class="debug-value" id="debug-time">0h</span>
+            <button class="debug-btn" data-delta="1">▶</button>
+        </div>
+        <div class="debug-row" data-key="feedCount">
+            <span>밥 횟수</span>
+            <button class="debug-btn" data-delta="-1">◀</button>
+            <span class="debug-value" id="debug-feed">0</span>
+            <button class="debug-btn" data-delta="1">▶</button>
+        </div>
+        <div class="debug-row" data-key="visibleMinutes">
+            <span>체류(분)</span>
+            <button class="debug-btn" data-delta="-10">◀</button>
+            <span class="debug-value" id="debug-visible">0</span>
+            <button class="debug-btn" data-delta="10">▶</button>
+        </div>
+        <div class="debug-row" data-key="cafeChance">
+            <span>카페%</span>
+            <button class="debug-btn" data-delta="-0.05">◀</button>
+            <span class="debug-value" id="debug-cafe">0%</span>
+            <button class="debug-btn" data-delta="0.05">▶</button>
+        </div>
     </div>
 
     <!-- Play Mode Modal -->
@@ -971,6 +995,7 @@
     <div class="modal-overlay" id="achievements-modal">
         <div class="modal achievements-modal">
             <h3>업적</h3>
+            <div class="achievement-desc" id="achievement-summary"></div>
             <div class="achievements-list" id="achievements-list"></div>
             <div class="modal-close" id="close-achievements">닫기</div>
         </div>
@@ -979,6 +1004,7 @@
     <div class="modal-overlay" id="places-modal">
         <div class="modal places-modal">
             <h3>발견한 장소</h3>
+            <div class="achievement-desc" id="places-summary"></div>
             <div class="places-list" id="places-list"></div>
             <div class="modal-close" id="close-places">닫기</div>
         </div>
@@ -1311,8 +1337,13 @@
                 empty.className = 'achievement-desc';
                 empty.textContent = '아직 업적이 없어.';
                 achievementsList.appendChild(empty);
+                const summary = document.getElementById('achievement-summary');
+                if (summary) summary.textContent = '획득 0 / 전체 0';
                 return;
             }
+            const unlockedCount = items.filter((a) => !!a.unlockedAt).length;
+            const summary = document.getElementById('achievement-summary');
+            if (summary) summary.textContent = `획득 ${unlockedCount} / 전체 ${items.length}`;
             items.forEach((a) => {
                 const unlocked = !!a.unlockedAt;
                 const item = document.createElement('div');
@@ -1320,14 +1351,19 @@
                 const title = document.createElement('div');
                 title.className = 'achievement-title';
                 const name = a.name || a.achievementId || '업적';
-                title.textContent = `${unlocked ? '✅' : '🔒'} ${name}`;
+                const hiddenName = a.hidden ? '???' : '???';
+                title.textContent = `${unlocked ? '✅' : '🔒'} ${unlocked ? name : hiddenName}`;
                 const desc = document.createElement('div');
                 desc.className = 'achievement-desc';
                 const parts = [];
-                if (a.description) parts.push(a.description);
-                if (typeof a.progress === 'number') parts.push(`진행도 ${a.progress}`);
-                if (a.points) parts.push(`${a.points}pt`);
-                desc.textContent = parts.join(' · ') || '설명이 없어.';
+                if (unlocked) {
+                    if (a.description) parts.push(a.description);
+                    if (typeof a.progress === 'number') parts.push(`진행도 ${a.progress}`);
+                    if (a.points) parts.push(`${a.points}pt`);
+                    desc.textContent = parts.join(' · ') || '설명이 없어.';
+                } else {
+                    desc.textContent = '내용 숨김';
+                }
                 item.appendChild(title);
                 item.appendChild(desc);
                 achievementsList.appendChild(item);
@@ -1432,8 +1468,13 @@
                 empty.className = 'achievement-desc';
                 empty.textContent = '아직 발견한 장소가 없어요.';
                 placesList.appendChild(empty);
+                const summary = document.getElementById('places-summary');
+                if (summary) summary.textContent = '발견 0 / 전체 0';
                 return;
             }
+            const unlockedCount = places.filter((p) => p.unlocked).length;
+            const summary = document.getElementById('places-summary');
+            if (summary) summary.textContent = `발견 ${unlockedCount} / 전체 ${places.length}`;
             places.forEach((place) => {
                 const row = document.createElement('div');
                 row.className = `place-row${place.unlocked ? '' : ' locked'}`;
@@ -1468,6 +1509,11 @@
             toast.textContent = message;
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 1400);
+        }
+
+        function showAchievementToast(label) {
+            const text = label ? `🏆 업적 달성: ${label}` : '🏆 업적 달성';
+            showToast(text);
         }
 
         function renderPlaceDebugList(places = []) {
@@ -1585,6 +1631,21 @@
 
                 const debugEvo = document.getElementById('debug-evo');
                 if (debugEvo) debugEvo.textContent = Number(stats.evolutionProgress ?? 0).toFixed(2);
+
+                const debugTime = document.getElementById('debug-time');
+                if (debugTime) debugTime.textContent = `${stats.timeOffsetHours ?? 0}h`;
+
+                const debugFeed = document.getElementById('debug-feed');
+                if (debugFeed) debugFeed.textContent = stats.feedCount ?? 0;
+
+                const debugVisible = document.getElementById('debug-visible');
+                if (debugVisible) debugVisible.textContent = stats.visibleMinutes ?? 0;
+
+                const debugCafe = document.getElementById('debug-cafe');
+                if (debugCafe) {
+                    const pct = Math.round((stats.cafeChance ?? 0) * 100);
+                    debugCafe.textContent = `${pct}%`;
+                }
 
                 // Update Play Button (Cooldown & Level Check) - Now inside Menu
                 const playBtn = document.getElementById('play-btn-menu');
@@ -1778,6 +1839,10 @@
 
         document.getElementById('close-achievements').addEventListener('click', () => {
             achievementsModal.style.display = 'none';
+        });
+
+        ipcRenderer.on('achievement-toast', (event, payload = {}) => {
+            showAchievementToast(payload.label);
         });
 
         document.getElementById('close-places').addEventListener('click', () => {
