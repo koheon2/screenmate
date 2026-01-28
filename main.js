@@ -133,8 +133,7 @@ const FEMALE_CHARACTERS = new Set([
 ]);
 
 function getCharacterGender(englishName) {
-    if (!englishName) return 'male';
-    return FEMALE_CHARACTERS.has(englishName) ? 'female' : 'male';
+    return getGenderForCharacterName(englishName) || 'male';
 }
 
 const BREEDING_STAGES = {
@@ -156,9 +155,17 @@ const FEMALE_CHARACTER_NAMES = new Set([
     'memetchi'
 ]);
 
-function getGenderForCharacterName(name) {
+function normalizeGenderKey(name) {
     if (!name) return null;
-    return FEMALE_CHARACTER_NAMES.has(name) ? 'female' : 'male';
+    const eng = getEnglishNameFromKorean(name);
+    const key = (eng || name).toString().trim().toLowerCase();
+    return key || null;
+}
+
+function getGenderForCharacterName(name) {
+    const key = normalizeGenderKey(name);
+    if (!key) return null;
+    return FEMALE_CHARACTER_NAMES.has(key) ? 'female' : 'male';
 }
 
 function getEnglishNameFromKorean(koreanName) {
@@ -1798,6 +1805,30 @@ ipcMain.handle('debug-check-places', async () => {
         return { success: false, message: err.message };
     }
 });
+
+ipcMain.handle('debug-force-breeding', async () => {
+    try {
+        if (!playerStats) return { success: false, message: '캐릭터가 없어.' };
+        playerStats.level = Math.max(playerStats.level || 0, 3);
+        await refreshFriendsCache(true);
+        if (!friendsCache || !friendsCache.length) {
+            return { success: false, message: '친구가 없어.' };
+        }
+        const friend = friendsCache[0];
+        if (!playerStats.friendIntimacyOverrides || typeof playerStats.friendIntimacyOverrides !== 'object') {
+            playerStats.friendIntimacyOverrides = {};
+        }
+        playerStats.friendIntimacyOverrides[friend.friendCharacterId] = 100;
+        saveUserData({ touchLocalUpdatedAt: false });
+        const started = await startBreedingFlow(friend);
+        if (started && homeWindow) {
+            homeWindow.webContents.send('home-speech', '...');
+        }
+        return { success: started };
+    } catch (err) {
+        return { success: false, message: err.message };
+    }
+});
 ipcMain.handle('debug-adjust-friend-intimacy', async (event, payload = {}) => {
     if (!playerStats) return { success: false, message: '캐릭터가 없어.' };
     const friendCharacterId = payload.friendCharacterId;
@@ -1993,6 +2024,7 @@ async function createHouseWindow(
     const isNightHours = getGameNow().getHours() < 6;
     const sleeping = isNightHours;
     const isBreedingKissing = breedingStage === BREEDING_STAGES.KISSING;
+    const isBreedingEggHome = breedingStage === BREEDING_STAGES.EGG_HOME;
     const debugPlacement = breedingStage === 'DEBUG';
 
     houseWindow = new BrowserWindow({
@@ -2017,7 +2049,9 @@ async function createHouseWindow(
     }
 
     let spritePath = playerStats?.characterImage || '';
-    if (isBreedingKissing) {
+    if (isBreedingEggHome) {
+        spritePath = '';
+    } else if (isBreedingKissing) {
         const kissingPath =
             resolveSpritePathFor(playerStats.characterName, 3, 'kissing.webp') ||
             resolveSpritePathFor(playerStats.characterName, 3, 'normal.webp');
@@ -2761,10 +2795,21 @@ ipcMain.on('open-chat-window', () => {
 
 ipcMain.on('toggle-character', () => {
     if (characterWindow) {
-        if (!characterState.isReturningHome) {
-            characterState.isReturningHome = true;
-            closeChatWindow();
-        }
+        (async () => {
+            const breedingStarted = await startBreedingFlow();
+            if (breedingStarted) {
+                if (homeWindow) homeWindow.webContents.send('home-speech', '...');
+                if (!characterState.isReturningHome) {
+                    characterState.isReturningHome = true;
+                    closeChatWindow();
+                }
+                return;
+            }
+            if (!characterState.isReturningHome) {
+                characterState.isReturningHome = true;
+                closeChatWindow();
+            }
+        })().catch((e) => console.error('[Home] toggle-character (out) failed', e));
     } else {
         (async () => {
             recomputeSleepMode(new Date());
@@ -3096,6 +3141,9 @@ function maybeEvolveFromProgress() {
 // Check evolution progress periodically (Level 1+)
 // Update character image based on happiness and level
 function updateDynamicImage() {
+    if (playerStats?.breedingStage === BREEDING_STAGES.EGG_HOME) {
+        return;
+    }
     if (playerStats.level === 0 || !playerStats.characterName) return;
 
     const baseDir = path.join(__dirname, 'assets', `level${playerStats.level}`, playerStats.characterName);
@@ -3213,10 +3261,26 @@ async function findEligibleBreedingPartner() {
                     if (computed > intimacy) intimacy = computed;
                 }
             }
-            if (intimacy < 100) return false;
-            if (getFriendStageIndex(f) < 3) return false;
+            if (intimacy < 100) {
+                console.log('[Breeding] skip (intimacy)', f.friendName, intimacy);
+                return false;
+            }
+            const stage = getFriendStageIndex(f);
+            if (stage < 3) {
+                console.log('[Breeding] skip (level)', f.friendName, stage);
+                return false;
+            }
             const friendGender = getFriendGender(f);
-            return friendGender && friendGender !== myGender;
+            if (!friendGender) {
+                console.log('[Breeding] skip (gender missing)', f.friendName);
+                return false;
+            }
+            if (friendGender === myGender) {
+                console.log('[Breeding] skip (same gender)', f.friendName, friendGender);
+                return false;
+            }
+            console.log('[Breeding] candidate', f.friendName, { intimacy, stage, friendGender, myGender });
+            return true;
         });
 
         if (candidates.length === 0) return null;

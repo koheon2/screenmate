@@ -997,6 +997,10 @@
             <span class="debug-value" id="debug-breeding">0%</span>
             <button class="debug-btn" data-delta="0.1">▶</button>
         </div>
+        <div class="debug-row">
+            <span>번식</span>
+            <button class="debug-btn" id="debug-force-breeding">강제 시작</button>
+        </div>
     </div>
 
     <!-- Play Mode Modal -->
@@ -1203,10 +1207,42 @@
                     subtitle: '검색 탭에서 초대코드로 친구를 찾아봐.'
                 });
             } else {
+                const characterNameMap = {
+                    'marupitchi': '마루피치',
+                    'young-mametchi': '영마메치',
+                    'kuchipatchi': '쿠치파치',
+                    'memetchi': '메메치',
+                    'lovelitchi': '러블리치',
+                    'kuromametchi': '쿠로마메치',
+                    'ichigotchi': '이치고치',
+                    'gozarutchi': '고자루치',
+                    'kikitchi': '키키치',
+                    'mametchi': '마메치',
+                    'chiroritchi': '치로리치',
+                    'peacetchi': '피스치'
+                };
+                const femaleCharacters = new Set([
+                    'marupitchi',
+                    'chiroritchi',
+                    'peacetchi',
+                    'lovelitchi',
+                    'memetchi'
+                ]);
+                const toEnglishName = (koreanName) => {
+                    if (!koreanName) return null;
+                    const entry = Object.entries(characterNameMap).find(([, value]) => value === koreanName);
+                    return entry ? entry[0] : null;
+                };
+                const getGenderLabel = (koreanName) => {
+                    const english = toEnglishName(koreanName) || koreanName;
+                    if (!english) return '남';
+                    return femaleCharacters.has(english) ? '여' : '남';
+                };
                 friendsRes.data.forEach((f) => {
+                    const gender = getGenderLabel(f.friendName);
                     renderFriendRow(friendsSection, {
                         title: `${f.friendName} · 친밀도 ${f.intimacy}`,
-                        subtitle: `Lv.${f.friendLevel ?? '?'} · ${f.friendSpecies || '친구'} · 코드 ${f.friendInviteCode || '???'}`,
+                        subtitle: `Lv.${f.friendLevel ?? '?'} · ${gender} · ${f.friendSpecies || '친구'} · 코드 ${f.friendInviteCode || '???'}`,
                         actions: [
                             {
                                 label: '메시지',
@@ -1439,11 +1475,43 @@
             grid.innerHTML = '';
             eventsList.innerHTML = '';
 
+            const genderMap = {
+                'marupitchi': '여',
+                'chiroritchi': '여',
+                'peacetchi': '여',
+                'lovelitchi': '여',
+                'memetchi': '여'
+            };
+            const toEnglishName = (koreanName) => {
+                const map = {
+                    'marupitchi': '마루피치',
+                    'young-mametchi': '영마메치',
+                    'kuchipatchi': '쿠치파치',
+                    'memetchi': '메메치',
+                    'lovelitchi': '러블리치',
+                    'kuromametchi': '쿠로마메치',
+                    'ichigotchi': '이치고치',
+                    'gozarutchi': '고자루치',
+                    'kikitchi': '키키치',
+                    'mametchi': '마메치',
+                    'chiroritchi': '치로리치',
+                    'peacetchi': '피스치'
+                };
+                const entry = Object.entries(map).find(([, value]) => value === koreanName);
+                return entry ? entry[0] : null;
+            };
+            const genderLabel = (() => {
+                const english = toEnglishName(character.name) || character.name;
+                if (!english) return '남';
+                return genderMap[english] || '남';
+            })();
+
             const cards = [
                 { label: '이름', value: character.name },
                 { label: '초대코드', value: character.inviteCode || '-' },
                 { label: '종족', value: character.species || '-' },
                 { label: '단계', value: `${character.stageIndex ?? '-'}단계` },
+                { label: '성별', value: genderLabel },
                 { label: '생존', value: character.isAlive ? '살아있음' : '사망' }
             ];
 
@@ -1640,8 +1708,15 @@
                 const intimacy = typeof stats.intimacyScore === 'number' ? stats.intimacyScore : 0;
 
                 // Update Character Image
-                if (stats.characterImage) {
-                    document.getElementById('character-img').src = stats.characterImage;
+                const characterImgEl = document.getElementById('character-img');
+                if (characterImgEl) {
+                    if (stats.characterImage) {
+                        characterImgEl.src = stats.characterImage;
+                        characterImgEl.style.opacity = '1';
+                    } else {
+                        characterImgEl.src = '';
+                        characterImgEl.style.opacity = '0';
+                    }
                 }
 
                 // Update Character Name
@@ -1763,6 +1838,15 @@
             debugPanel.addEventListener('click', async (event) => {
                 const button = event.target.closest('.debug-btn');
                 if (!button) return;
+                if (button.id === 'debug-force-breeding') {
+                    const res = await ipcRenderer.invoke('debug-force-breeding');
+                    if (!res?.success) {
+                        showAlert(res?.message || '번식 시작 실패');
+                    } else {
+                        showAlert('번식 시작됨');
+                    }
+                    return;
+                }
                 const row = button.closest('.debug-row');
                 if (!row) return;
                 const key = row.dataset.key;

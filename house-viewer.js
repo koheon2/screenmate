@@ -269,6 +269,7 @@ window.__setTimeOffsetHours = (offset) => {
 let modelRoot = null;
 let characterSprite = null;
 let companionSprite = null;
+let eggSprite = null;
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const placementPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.8);
@@ -355,6 +356,24 @@ function toggleCameraOnlyMode() {
 const loader = new GLTFLoader();
 const modelUrl = new URL(`assets/models/${modelFile}`, window.location.href).href;
 
+function ensureEggSprite() {
+    if (eggSprite || !breedingEggHome) return;
+    const eggTexture = new THREE.TextureLoader().load('assets/level0/level0.png');
+    eggTexture.colorSpace = THREE.SRGBColorSpace;
+    const eggMaterial = new THREE.SpriteMaterial({
+        map: eggTexture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false
+    });
+    eggSprite = new THREE.Sprite(eggMaterial);
+    eggSprite.scale.set(0.32, 0.32, 1);
+    const bed = PLACEMENTS.bed || { x: -0.2, y: 0.6, z: 0.02 };
+    eggSprite.position.set(bed.x, bed.y + 0.05, bed.z);
+    eggSprite.renderOrder = 999;
+    scene.add(eggSprite);
+}
+
 function setStatus(text) {
     if (!statusEl) return;
     statusEl.textContent = text;
@@ -399,6 +418,7 @@ loader.load(
         controls.target.set(0, 0.8, 0);
         controls.update();
 
+        ensureEggSprite();
         setStatus(placeName);
     },
     (event) => {
@@ -587,6 +607,21 @@ function handlePlaceSpeechInteraction(event) {
 
 renderer.domElement.addEventListener('pointerdown', handlePlaceSpeechInteraction);
 
+function handleEggInteraction(event) {
+    if (!eggSprite || !ipcRenderer) return;
+    if (!breedingEggHome) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(eggSprite, true);
+    if (!hits || hits.length === 0) return;
+    ipcRenderer.send('breeding-egg-acquired');
+    if (ipcRenderer) ipcRenderer.send('close-house-viewer');
+}
+
+renderer.domElement.addEventListener('pointerdown', handleEggInteraction);
+
 function resize() {
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -762,6 +797,7 @@ function showEgg(mode) {
 
 if (!breedingKissing) {
     if (breedingEggHome) {
+        ensureEggSprite();
         showEgg('egg-home');
     } else if (breedingCradle || hasEgg) {
         showEgg('cradle');
