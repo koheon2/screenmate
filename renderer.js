@@ -125,10 +125,56 @@ character.addEventListener('mouseenter', () => {
     ipcRenderer.send('set-ignore-mouse', false);
 });
 character.addEventListener('mouseleave', () => {
-    ipcRenderer.send('set-ignore-mouse', true);
+    if (!isDragging) {
+        ipcRenderer.send('set-ignore-mouse', true);
+    }
 });
 
-character.addEventListener('click', async () => {
+// Drag & Click Logic
+let isDragging = false;
+let startX;
+let startY;
+const DRAG_THRESHOLD = 5;
+
+character.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isDragging = false;
+    startX = e.screenX;
+    startY = e.screenY;
+    ipcRenderer.send('set-dragging', true);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+});
+
+function onMouseMove(e) {
+    const dx = e.screenX - startX;
+    const dy = e.screenY - startY;
+
+    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+        isDragging = true;
+        character.classList.add('dragging');
+    }
+
+    if (isDragging) {
+        ipcRenderer.send('window-drag', { dx, dy });
+        startX = e.screenX;
+        startY = e.screenY;
+    }
+}
+
+function onMouseUp() {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+    character.classList.remove('dragging');
+    ipcRenderer.send('set-dragging', false);
+
+    if (!isDragging) {
+        handleCharacterClick();
+    }
+    isDragging = false;
+}
+
+async function handleCharacterClick() {
     const stats = await ipcRenderer.invoke('get-player-status');
     if (stats?.level > 0 && stats?.dbCharacterId) {
         ipcRenderer.send('open-chat-window');
@@ -138,7 +184,7 @@ character.addEventListener('click', async () => {
     ipcRenderer.send('egg-clicked');
     character.classList.add('click-vibrate');
     setTimeout(() => character.classList.remove('click-vibrate'), 200);
-});
+}
 
 
 
