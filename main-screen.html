@@ -1240,9 +1240,10 @@
                 };
                 friendsRes.data.forEach((f) => {
                     const gender = getGenderLabel(f.friendName);
+                    const speciesLabel = f.friendName || '친구';
                     renderFriendRow(friendsSection, {
                         title: `${f.friendName} · 친밀도 ${f.intimacy}`,
-                        subtitle: `Lv.${f.friendLevel ?? '?'} · ${gender} · ${f.friendSpecies || '친구'} · 코드 ${f.friendInviteCode || '???'}`,
+                        subtitle: `Lv.${f.friendLevel ?? '?'} · ${gender} · ${speciesLabel} · 코드 ${f.friendInviteCode || '???'}`,
                         actions: [
                             {
                                 label: '메시지',

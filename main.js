@@ -3110,6 +3110,9 @@ function evolveCharacter(targetLevel) {
                 mainWindow.webContents.send('update-image', toRenderableImage(fullPath));
             }
 
+            // Push name/level changes immediately so friends see updated name.
+            syncCharacterToDB();
+
             saveUserData();
             console.log(`[Evolution] Success! Level ${targetLevel}`);
 
