@@ -68,6 +68,7 @@ let currentUser = null;
 let isGameRunning = false;
 let playerStats = null;
 const DEFAULT_CAFE_CHANCE = 0.1;
+const DEFAULT_BREEDING_CHANCE = 0.01;
 let petHistory = []; // Archive for dead pets
 let bootstrapCache = null;
 let friendsCache = [];
@@ -75,6 +76,7 @@ let friendsCacheAt = 0;
 // 5 minutes cooldown (Disabled for testing)
 // 5 minutes cooldown (Disabled for testing)
 const PLAY_COOLDOWN = 0;
+const FEED_COOLDOWN = 4 * 60 * 60 * 1000;
 // Dynamic user data path based on logged-in user
 function getUserDataPath() {
     if (!currentUser || !currentUser.id) return null;
@@ -180,6 +182,7 @@ const INITIAL_STATS = {
     lastHungerDamageTime: Date.now(),
     lastAgingTime: Date.now(),
     birthday: Date.now(),
+    hunger: 0,
     discoveredPlaces: [],
     birthEventSent: false,
     deathEventSent: false,
@@ -202,11 +205,14 @@ const INITIAL_STATS = {
     forcedAwayReason: null,
     forcedAwayMeta: null,
     pendingPoliceAfterBank: false,
+    pendingPaydayDebug: false,
     cafePending: false,
     cafeChance: DEFAULT_CAFE_CHANCE,
+    breedingChance: DEFAULT_BREEDING_CHANCE,
     debugTimeOffsetHours: 0,
     schoolLastDate: null,
     park2UsedFriendIds: [],
+    friendIntimacyOverrides: {},
     achievements: {},
     visibleAccumMillis: 0,
     visibleLastTickAt: 0,
@@ -410,8 +416,7 @@ function setForcedAway(placeId, reason, meta = null) {
     saveUserData();
 
     if (characterWindow && !characterState.isReturningHome) {
-        characterState.isReturningHome = true;
-        closeChatWindow();
+        return { alreadyVisible: true };
     }
     if (homeWindow) {
         homeWindow.webContents.send('home-speech', '...');
@@ -578,6 +583,12 @@ function loadUserData() {
                 playerStats.achievements = playerStats.achievements || {};
                 playerStats.feedCount = playerStats.feedCount || 0;
                 playerStats.cafeChance = typeof playerStats.cafeChance === 'number' ? playerStats.cafeChance : DEFAULT_CAFE_CHANCE;
+                playerStats.breedingChance = typeof playerStats.breedingChance === 'number' ? playerStats.breedingChance : DEFAULT_BREEDING_CHANCE;
+                if (!playerStats.friendIntimacyOverrides || typeof playerStats.friendIntimacyOverrides !== 'object') {
+                    playerStats.friendIntimacyOverrides = {};
+                }
+                playerStats.pendingPaydayDebug = !!playerStats.pendingPaydayDebug;
+                playerStats.hunger = typeof playerStats.hunger === 'number' ? playerStats.hunger : 0;
                 playerStats.debugTimeOffsetHours = Number.isFinite(playerStats.debugTimeOffsetHours) ? playerStats.debugTimeOffsetHours : 0;
                 playerStats.visibleAccumMillis = playerStats.visibleAccumMillis || 0;
                 playerStats.visibleLastTickAt = playerStats.visibleLastTickAt || 0;
@@ -1088,11 +1099,21 @@ async function rejectFriendRequest(characterId, requestId) {
     });
 }
 
+function applyFriendDebugOverrides(friends = []) {
+    if (!playerStats?.friendIntimacyOverrides) return friends;
+    return friends.map((f) => {
+        const override = playerStats.friendIntimacyOverrides[f.friendCharacterId];
+        if (typeof override !== 'number') return f;
+        return { ...f, intimacy: override };
+    });
+}
+
 async function getFriends(characterId) {
-    return apiRequest({
+    const data = await apiRequest({
         method: 'GET',
         url: `${API_BASE_URL}/characters/${characterId}/friends`
     });
+    return applyFriendDebugOverrides(Array.isArray(data) ? data : []);
 }
 
 async function refreshFriendsCache(force = false) {
@@ -1539,10 +1560,21 @@ ipcMain.handle('debug-adjust-stat', async (event, payload = {}) => {
             playerStats.cafeChance = next;
             break;
         }
+        case 'breedingChance': {
+            const current = Number(playerStats.breedingChance) || 0;
+            const next = Math.max(0, Math.min(1, current + delta));
+            playerStats.breedingChance = next;
+            break;
+        }
         case 'timeOffsetHours': {
             const current = Number(playerStats.debugTimeOffsetHours) || 0;
             const next = Math.max(-23, Math.min(23, current + delta));
             playerStats.debugTimeOffsetHours = next;
+            if (houseWindow && !houseWindow.isDestroyed()) {
+                houseWindow.webContents.send('debug-time-updated', {
+                    offsetHours: playerStats.debugTimeOffsetHours
+                });
+            }
             break;
         }
         default:
@@ -1577,6 +1609,163 @@ ipcMain.handle('debug-adjust-stat', async (event, payload = {}) => {
     }
 
     return { success: true };
+});
+
+ipcMain.handle('debug-force-park2', async () => {
+    try {
+        if (!playerStats) return { success: false, message: '캐릭터가 없어.' };
+        await refreshFriendsCache(true);
+        let friendId = getEligiblePark2FriendId();
+        if (!friendId) {
+            const fallback = (friendsCache || [])[0];
+            friendId = fallback?.friendCharacterId || null;
+        }
+        if (!friendId) return { success: false, message: '친구가 없어.' };
+        setForcedAway('park2', 'PARK2', { friendCharacterId: friendId });
+        return { success: true };
+    } catch (err) {
+        return { success: false, message: err.message };
+    }
+});
+
+ipcMain.handle('debug-force-place', async (event, { placeId } = {}) => {
+    try {
+        if (!playerStats) return { success: false, message: '캐릭터가 없어.' };
+        if (!placeId) return { success: false, message: '장소가 없어.' };
+        if (placeId.startsWith('house')) {
+            return { success: false, message: '집은 제외야.' };
+        }
+        if (placeId === 'park2') {
+            await refreshFriendsCache(true);
+            let friendId = getEligiblePark2FriendId();
+            if (!friendId) {
+                const fallback = (friendsCache || [])[0];
+                friendId = fallback?.friendCharacterId || null;
+            }
+            if (!friendId) return { success: false, message: '친구가 없어.' };
+            setForcedAway('park2', 'PARK2', { friendCharacterId: friendId });
+            return { success: true };
+        }
+        const place = getPlaceById(placeId);
+        if (!place) return { success: false, message: '알 수 없는 장소야.' };
+        setForcedAway(placeId, 'DEBUG');
+        return { success: true };
+    } catch (err) {
+        return { success: false, message: err.message };
+    }
+});
+
+ipcMain.handle('debug-prepare-place', async (event, { placeId } = {}) => {
+    try {
+        if (!playerStats) return { success: false, message: '캐릭터가 없어.' };
+        if (!placeId) return { success: false, message: '장소가 없어.' };
+        if (placeId.startsWith('house')) {
+            return { success: false, message: '집은 제외야.' };
+        }
+
+        switch (placeId) {
+            case 'bank': {
+                playerStats.level = Math.max(playerStats.level || 0, 3);
+                playerStats.intimacyScore = Math.max(playerStats.intimacyScore || 0, 90);
+                playerStats.pendingPaydayDebug = true;
+                break;
+            }
+            case 'police': {
+                playerStats.pendingPoliceAfterBank = true;
+                break;
+            }
+            case 'cafe': {
+                playerStats.level = Math.max(playerStats.level || 0, 2);
+                playerStats.cafePending = true;
+                break;
+            }
+            case 'school': {
+                playerStats.level = 2;
+                const now = new Date();
+                const targetHour = 10;
+                const offset = targetHour - now.getHours();
+                playerStats.debugTimeOffsetHours = Math.max(-23, Math.min(23, offset));
+                playerStats.schoolLastDate = null;
+                break;
+            }
+            case 'toilet': {
+                playerStats.feedCount = Math.max(playerStats.feedCount || 0, 3);
+                break;
+            }
+            case 'park2': {
+                playerStats.level = Math.max(playerStats.level || 0, 2);
+                await refreshFriendsCache(true);
+                const friend = (friendsCache || [])[0];
+                if (!friend) return { success: false, message: '친구가 없어.' };
+                if (!playerStats.friendIntimacyOverrides || typeof playerStats.friendIntimacyOverrides !== 'object') {
+                    playerStats.friendIntimacyOverrides = {};
+                }
+                playerStats.friendIntimacyOverrides[friend.friendCharacterId] = 70;
+                const used = new Set(playerStats.park2UsedFriendIds || []);
+                used.delete(friend.friendCharacterId);
+                playerStats.park2UsedFriendIds = Array.from(used);
+                break;
+            }
+            case 'pharmacy': {
+                const FIVE_HOURS = 5 * 60 * 60 * 1000;
+                playerStats.visibleAccumMillis = FIVE_HOURS;
+                break;
+            }
+            default:
+                return { success: false, message: '알 수 없는 장소야.' };
+        }
+
+        saveUserData({ touchLocalUpdatedAt: false });
+        return { success: true };
+    } catch (err) {
+        return { success: false, message: err.message };
+    }
+});
+
+async function checkPlaceConditionsFromDebug() {
+    if (!playerStats || !isGameRunning) return false;
+    await refreshFriendsCache(true);
+    if (maybeTriggerPoliceAfterBank()) return true;
+    if (maybeTriggerCafeVisit()) return true;
+    if (maybeTriggerSchoolVisit()) return true;
+    if (maybeTriggerToiletVisit()) return true;
+    if (maybeTriggerPark2Visit()) return true;
+    return false;
+}
+
+ipcMain.handle('debug-check-places', async () => {
+    try {
+        const triggered = await checkPlaceConditionsFromDebug();
+        return { success: true, triggered };
+    } catch (err) {
+        return { success: false, message: err.message };
+    }
+});
+ipcMain.handle('debug-adjust-friend-intimacy', async (event, payload = {}) => {
+    if (!playerStats) return { success: false, message: '캐릭터가 없어.' };
+    const friendCharacterId = payload.friendCharacterId;
+    const delta = Number(payload.delta) || 0;
+    if (!friendCharacterId) return { success: false, message: '친구 정보를 찾지 못했어.' };
+
+    const currentFriend = (friendsCache || []).find((f) => f.friendCharacterId === friendCharacterId);
+    const baseValue = Number(
+        playerStats.friendIntimacyOverrides?.[friendCharacterId] ??
+        currentFriend?.intimacy ??
+        0
+    ) || 0;
+    const next = Math.max(0, Math.min(100, baseValue + delta));
+
+    if (!playerStats.friendIntimacyOverrides || typeof playerStats.friendIntimacyOverrides !== 'object') {
+        playerStats.friendIntimacyOverrides = {};
+    }
+    playerStats.friendIntimacyOverrides[friendCharacterId] = next;
+
+    if (currentFriend) {
+        currentFriend.intimacy = next;
+    }
+
+    saveUserData({ touchLocalUpdatedAt: false });
+    return { success: true, intimacy: next };
 });
 
 ipcMain.handle('reset-game', () => {
@@ -1693,6 +1882,11 @@ function resolveSpritePathFor(name, level, emotion = 'normal.webp') {
     return null;
 }
 
+function normalizeCharacterKey(name) {
+    if (!name) return null;
+    return getEnglishNameFromKorean(name) || name;
+}
+
 function resolveBreedingPartnerImageUrl(partner) {
     const partnerName = partner?.friendName || '';
     const partnerPath =
@@ -1793,9 +1987,19 @@ async function createHouseWindow(
     let companionImgUrl = '';
     let companionPlacement = null;
     if (place.id === 'park2' && companion?.name) {
+        const rawName = companion.name;
+        const normalized = normalizeCharacterKey(rawName);
+        const rawLevel = Number(companion.friendLevel);
+        const compLevel = Number.isFinite(rawLevel) && rawLevel >= 1 ? rawLevel : 3;
         const compPath =
-            resolveSpritePathFor(companion.name, 3, 'happy.webp') ||
-            resolveSpritePathFor(companion.name, 3, 'normal.webp');
+            resolveSpritePathFor(normalized, compLevel, 'happy.webp') ||
+            resolveSpritePathFor(normalized, compLevel, 'normal.webp') ||
+            resolveSpritePathFor(normalized, 3, 'happy.webp') ||
+            resolveSpritePathFor(normalized, 3, 'normal.webp') ||
+            resolveSpritePathFor(normalized, 2, 'happy.webp') ||
+            resolveSpritePathFor(normalized, 2, 'normal.webp') ||
+            resolveSpritePathFor(normalized, 1, 'happy.webp') ||
+            resolveSpritePathFor(normalized, 1, 'normal.webp');
         if (compPath) companionImgUrl = pathToFileURL(compPath).toString();
         companionPlacement = getPlacementByLabel(place.id, '다리2');
     }
@@ -1803,36 +2007,42 @@ async function createHouseWindow(
         ? (getPlacementByLabel(place.id, '다리1') || placementData)
         : placementData;
 
-    houseWindow.loadFile('house-viewer.html', {
-        query: {
-            mode: 'overlay',
-            img: imgUrl,
-            screen: screenCaptureUrl,
-            placeId: place.id,
-            placeName: placementName || place.name,
-            model: place.model,
-            isNew: isNewPlace ? '1' : '0',
-            sleeping: sleeping ? '1' : '0',
-            level: String(playerStats?.level ?? 0),
-            hasEgg: (playerStats && playerStats.hasEgg) ? '1' : '0',
-            breedingStage: breedingStage || '',
-            breeding: isBreedingKissing ? '1' : '0',
-            partnerImg: partnerImgUrl,
-            partnerName: breedingPartner?.friendName || '',
-            partnerCharacterId: breedingPartner?.friendCharacterId || '',
-            debugPlacement: debugPlacement ? '1' : '0',
-            placementX: primaryPlacement?.x ?? '',
-            placementY: primaryPlacement?.y ?? '',
-            placementZ: primaryPlacement?.z ?? '',
-            placementModelY: primaryPlacement?.modelY ?? '',
-            companionImg: companionImgUrl,
-            companionX: companionPlacement?.x ?? '',
-            companionY: companionPlacement?.y ?? '',
-            companionZ: companionPlacement?.z ?? '',
-            timeOffsetHours: String(playerStats?.debugTimeOffsetHours ?? 0)
-        }
+    try {
+        houseWindow.loadFile('house-viewer.html', {
+            query: {
+                mode: 'overlay',
+                img: imgUrl,
+                screen: '',
+                placeId: place.id,
+                placeName: placementName || place.name,
+                model: place.model,
+                isNew: isNewPlace ? '1' : '0',
+                sleeping: sleeping ? '1' : '0',
+                level: String(playerStats?.level ?? 0),
+                hasEgg: (playerStats && playerStats.hasEgg) ? '1' : '0',
+                breedingStage: breedingStage || '',
+                breeding: isBreedingKissing ? '1' : '0',
+                partnerImg: partnerImgUrl,
+                partnerName: breedingPartner?.friendName || '',
+                partnerCharacterId: breedingPartner?.friendCharacterId || '',
+                debugPlacement: debugPlacement ? '1' : '0',
+                placementX: primaryPlacement?.x ?? '',
+                placementY: primaryPlacement?.y ?? '',
+                placementZ: primaryPlacement?.z ?? '',
+                placementModelY: primaryPlacement?.modelY ?? '',
+                companionImg: companionImgUrl,
+                companionX: companionPlacement?.x ?? '',
+                companionY: companionPlacement?.y ?? '',
+                companionZ: companionPlacement?.z ?? '',
+                timeOffsetHours: String(playerStats?.debugTimeOffsetHours ?? 0)
+            }
+        });
+    } catch (err) {
+        console.error('House viewer load error:', err);
+    }
+    houseWindow.on('closed', () => {
+        houseWindow = null;
     });
-    houseWindow.on('closed', () => houseWindow = null);
 
     houseWindow.webContents.on('did-finish-load', () => {
         if (!houseWindow) return;
@@ -1841,6 +2051,9 @@ async function createHouseWindow(
             true
         );
         houseWindow.show();
+        if (screenCaptureUrl) {
+            houseWindow.webContents.send('house-screen', screenCaptureUrl);
+        }
 
         // DEBUG: Open devTools for breeding debugging
         houseWindow.webContents.openDevTools({ mode: 'detach' });
@@ -2345,7 +2558,11 @@ ipcMain.handle('start-peek', () => {
                 if (!friendId) return null;
                 const friend = (friendsCache || []).find((f) => f.friendCharacterId === friendId);
                 if (!friend) return null;
-                return { name: friend.friendName };
+                return {
+                    name: friend.friendName,
+                    species: friend.friendSpecies || null,
+                    friendLevel: friend.friendLevel ?? friend.friendStageIndex ?? null
+                };
             })() : null
         };
     }
@@ -2355,6 +2572,7 @@ ipcMain.handle('start-peek', () => {
     }
 
     let place;
+    const park2FriendId = playerStats?.forcedAwayMeta?.friendCharacterId || null;
     if (playerStats.level === 0) {
         place = getPlaceById('cradle');
         if (!isBreedingActive()) {
@@ -2382,7 +2600,18 @@ ipcMain.handle('start-peek', () => {
     saveUserData();
     const discoveredPlaces = playerStats.discoveredPlaces.map((id) => getPlaceById(id));
     // Peek always starts with the erase overlay.
-    return { place, isNew: true, discoveredPlaces };
+    const companion = place.id === 'park2' && park2FriendId
+        ? (() => {
+            const friend = (friendsCache || []).find((f) => f.friendCharacterId === park2FriendId);
+            if (!friend) return null;
+            return {
+                name: friend.friendName,
+                species: friend.friendSpecies || null,
+                friendLevel: friend.friendLevel ?? friend.friendStageIndex ?? null
+            };
+        })()
+        : null;
+    return { place, isNew: true, discoveredPlaces, companion };
 });
 
 ipcMain.handle('get-places', () => {
@@ -2473,17 +2702,24 @@ ipcMain.on('toggle-character', () => {
                 return;
             }
 
-            // Breeding starts only when the user presses home and conditions are met.
-            const breedingStarted = await startBreedingFlow();
-            if (breedingStarted) {
-                if (homeWindow) homeWindow.webContents.send('home-speech', '...');
-                return;
-            }
+        // Breeding starts only when the user presses home and conditions are met.
+        const breedingStarted = await startBreedingFlow();
+        if (breedingStarted) {
+            if (homeWindow) homeWindow.webContents.send('home-speech', '...');
+            return;
+        }
 
-            if (maybeTriggerPoliceAfterBank()) return;
-            if (maybeTriggerCafeVisit()) return;
-            if (maybeTriggerSchoolVisit()) return;
-            if (maybeTriggerToiletVisit()) return;
+        if (playerStats.pendingPaydayDebug) {
+            playerStats.pendingPaydayDebug = false;
+            triggerPaydaySequence();
+            if (homeWindow) homeWindow.webContents.send('home-speech', '...');
+            return;
+        }
+
+        if (maybeTriggerPoliceAfterBank()) return;
+        if (maybeTriggerCafeVisit()) return;
+        if (maybeTriggerSchoolVisit()) return;
+        if (maybeTriggerToiletVisit()) return;
             if (maybeTriggerPark2Visit()) return;
             if (playerStats.awayModeActive) {
                 playerStats.awayModeActive = false;
@@ -2879,11 +3115,16 @@ async function findEligibleBreedingPartner() {
 
         const candidates = friends.filter((f) => {
             let intimacy = f.intimacy || 0;
-            const baseTime = f.createdAt || f.created_at || f.updatedAt || f.updated_at;
-            if (baseTime) {
-                const elapsed = now - new Date(baseTime).getTime();
-                const computed = Math.floor(Math.min(1, elapsed / 1800000) * 100);
-                if (computed > intimacy) intimacy = computed;
+            const override = playerStats?.friendIntimacyOverrides?.[f.friendCharacterId];
+            if (typeof override === 'number') {
+                intimacy = override;
+            } else {
+                const baseTime = f.createdAt || f.created_at || f.updatedAt || f.updated_at;
+                if (baseTime) {
+                    const elapsed = now - new Date(baseTime).getTime();
+                    const computed = Math.floor(Math.min(1, elapsed / 1800000) * 100);
+                    if (computed > intimacy) intimacy = computed;
+                }
             }
             if (intimacy < 100) return false;
             if (getFriendStageIndex(f) < 3) return false;
@@ -2934,8 +3175,8 @@ async function retireCurrentCharacterForBreeding() {
     }
 }
 
-async function startBreedingFlow() {
-    const partner = await findEligibleBreedingPartner();
+async function startBreedingFlow(partnerOverride = null) {
+    const partner = partnerOverride || await findEligibleBreedingPartner();
     if (!partner) return false;
 
     playerStats.breedingStage = BREEDING_STAGES.KISSING;
@@ -2951,6 +3192,28 @@ async function startBreedingFlow() {
     playerStats.hasEgg = false;
     saveUserData({ touchLocalUpdatedAt: false });
     return true;
+}
+
+let breedingAutoInProgress = false;
+
+async function maybeAutoStartBreeding() {
+    if (!playerStats || !isGameRunning) return;
+    if (breedingAutoInProgress) return;
+    if (isBreedingActive() || playerStats.hasEgg) return;
+    const partner = await findEligibleBreedingPartner();
+    if (!partner) return;
+    const chance = typeof playerStats.breedingChance === 'number' ? playerStats.breedingChance : DEFAULT_BREEDING_CHANCE;
+    if (Math.random() >= chance) return;
+
+    breedingAutoInProgress = true;
+    try {
+        const started = await startBreedingFlow(partner);
+        if (started && homeWindow) {
+            homeWindow.webContents.send('home-speech', '...');
+        }
+    } finally {
+        breedingAutoInProgress = false;
+    }
 }
 
 setInterval(() => {
@@ -2980,6 +3243,12 @@ setInterval(() => {
     }
     if (playerStats.sickModeActive) {
         ensureSickForcedAway();
+    }
+
+    if (playerStats.hunger === undefined) playerStats.hunger = 0;
+    if (playerStats.hunger > 0) {
+        const decayPerMinute = 100 / (12 * 60);
+        playerStats.hunger = Math.max(0, playerStats.hunger - decayPerMinute);
     }
 
     // 1. Happiness Decay (Passive)
@@ -3089,12 +3358,23 @@ setInterval(() => {
     saveUserData();
 }, 60000); // Check every 1 minute
 
+// Refresh emotion more often without full status tick.
+setInterval(() => {
+    if (!playerStats || !isGameRunning) return;
+    updateDynamicImage();
+}, 15000);
+
 // Refresh friends cache periodically for park2 triggers.
 setInterval(() => {
     if (isGameRunning) {
         refreshFriendsCache();
     }
 }, 5 * 60 * 1000);
+
+// Breeding auto check (every 10 seconds)
+setInterval(() => {
+    maybeAutoStartBreeding();
+}, 10000);
 
 // LLM speech bubble timer (every 2 minutes)
 setInterval(async () => {
@@ -3301,6 +3581,7 @@ ipcMain.handle('friend-get-friends', async () => {
         if (updates.length > 0) {
             Promise.allSettled(updates);
         }
+        data = applyFriendDebugOverrides(data);
         friendsCache = Array.isArray(data) ? data : [];
         friendsCacheAt = Date.now();
 
@@ -3497,6 +3778,7 @@ ipcMain.handle('get-player-status', () => {
     const now = Date.now();
     const timeSinceLastPlay = now - playerStats.lastPlayTime;
     const remainingCooldown = Math.max(0, PLAY_COOLDOWN - timeSinceLastPlay);
+    const hunger = Math.max(0, Math.min(100, Number(playerStats.hunger) || 0));
 
     // Fallback logic for name
     let displayName = playerStats.characterName;
@@ -3531,9 +3813,11 @@ ipcMain.handle('get-player-status', () => {
         dbCharacterId: playerStats.dbCharacterId || null,
         characterName: koreanName,
         intimacyScore: playerStats.intimacyScore ?? 0,
+        hunger,
         feedCount: playerStats.feedCount || 0,
         visibleMinutes: Math.floor((playerStats.visibleAccumMillis || 0) / 60000),
         cafeChance: typeof playerStats.cafeChance === 'number' ? playerStats.cafeChance : DEFAULT_CAFE_CHANCE,
+        breedingChance: typeof playerStats.breedingChance === 'number' ? playerStats.breedingChance : DEFAULT_BREEDING_CHANCE,
         timeOffsetHours: playerStats.debugTimeOffsetHours || 0,
         evolutionProgress: playerStats.evolutionProgress || 0,
         hp: (playerStats.hp !== undefined) ? playerStats.hp : 100,
@@ -3548,6 +3832,13 @@ ipcMain.handle('start-play-mode', (event, mode) => {
     }
     if (isBreedingActive()) {
         return { success: false, message: '지금은 바빠...' };
+    }
+    if (mode === 'food') {
+        const lastFed = playerStats.lastFedTime || 0;
+        if (now - lastFed < FEED_COOLDOWN) {
+            const remaining = Math.ceil((FEED_COOLDOWN - (now - lastFed)) / (60 * 1000));
+            return { success: false, message: `아직 배불러... (${remaining}분 후)` };
+        }
     }
     if (now - playerStats.lastPlayTime < PLAY_COOLDOWN) {
         return { success: false, message: '아직 놀아줄 수 없습니다. (쿨타임 중)' };
@@ -3571,6 +3862,7 @@ ipcMain.handle('finish-play-mode', (event, mode) => {
     if (mode === 'food') {
         playerStats.lastFedTime = Date.now();
         playerStats.lastHungerDamageTime = Date.now();
+        playerStats.hunger = Math.min(100, (playerStats.hunger || 0) + 80);
         playerStats.feedCount = (playerStats.feedCount || 0) + 1;
         const chance = typeof playerStats.cafeChance === 'number' ? playerStats.cafeChance : DEFAULT_CAFE_CHANCE;
         if (playerStats.level >= 2 && Math.random() < chance) {

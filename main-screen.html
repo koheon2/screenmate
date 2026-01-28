@@ -328,11 +328,23 @@
             transition: width 0.5s ease;
         }
 
+        .progress-fill-hunger {
+            height: 100%;
+            background: linear-gradient(90deg, #c68642 0%, #8d5524 100%);
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
         .progress-fill-hp {
             height: 100%;
             background: linear-gradient(90deg, #cb2d3e 0%, #ef473a 100%);
             width: 100%;
             transition: width 0.5s ease;
+        }
+
+        .info-progress {
+            margin-top: 12px;
+            max-width: 240px;
         }
 
 
@@ -906,14 +918,14 @@
             </div>
         </div>
 
-        <!-- Evolution Bar -->
-        <div class="happiness-container" id="evo-container" style="display: none; margin-bottom: 25px;">
+        <!-- Hunger Bar -->
+        <div class="happiness-container" id="hunger-container" style="margin-bottom: 25px;">
             <div class="happiness-label">
-                <span>진화</span>
-                <span id="evo-val">0%</span>
+                <span>배고픔</span>
+                <span id="hunger-val">0/100</span>
             </div>
             <div class="progress-bg">
-                <div class="progress-fill-evo" id="evo-bar" style="width: 0%;"></div>
+                <div class="progress-fill-hunger" id="hunger-bar" style="width: 0%;"></div>
             </div>
         </div>
 
@@ -979,6 +991,12 @@
             <span class="debug-value" id="debug-cafe">0%</span>
             <button class="debug-btn" data-delta="0.05">▶</button>
         </div>
+        <div class="debug-row" data-key="breedingChance">
+            <span>번식%</span>
+            <button class="debug-btn" data-delta="-0.01">◀</button>
+            <span class="debug-value" id="debug-breeding">0%</span>
+            <button class="debug-btn" data-delta="0.01">▶</button>
+        </div>
     </div>
 
     <!-- Play Mode Modal -->
@@ -1040,6 +1058,15 @@
             <div class="info-section">
                 <div class="info-title">상태</div>
                 <div class="info-grid" id="character-info-grid"></div>
+                <div class="happiness-container info-progress" id="info-evo-container" style="display: none;">
+                    <div class="happiness-label">
+                        <span>진화</span>
+                        <span id="info-evo-val">0%</span>
+                    </div>
+                    <div class="progress-bg">
+                        <div class="progress-fill-evo" id="info-evo-bar" style="width: 0%;"></div>
+                    </div>
+                </div>
             </div>
             <div class="info-section">
                 <div class="info-title">이벤트</div>
@@ -1073,8 +1100,8 @@
             <button class="modal-btn" id="house-btn-menu">🏠 엿보기</button>
             <button class="modal-btn" id="friends-btn-menu">👥 친구</button>
             <button class="modal-btn" id="places-btn-menu">🗺️ 장소</button>
-            <button class="modal-btn" id="achievements-btn-menu">🏆 업적</button>
             <button class="modal-btn" id="place-debug-btn">🧭 장소 디버그</button>
+            <button class="modal-btn" id="achievements-btn-menu">🏆 업적</button>
             <div class="modal-close" id="close-menu">닫기</div>
         </div>
     </div>
@@ -1232,6 +1259,36 @@
                                     });
                                     showAlert(lines.join('\n') || '메시지가 없어.');
                                 }
+                            },
+                            {
+                                label: '친밀도 -10',
+                                secondary: true,
+                                onClick: async () => {
+                                    const res = await ipcRenderer.invoke('debug-adjust-friend-intimacy', {
+                                        friendCharacterId: f.friendCharacterId,
+                                        delta: -10
+                                    });
+                                    if (!res.success) {
+                                        showAlert(res.message || '조정 실패');
+                                        return;
+                                    }
+                                    loadFriendsData();
+                                }
+                            },
+                            {
+                                label: '친밀도 +10',
+                                secondary: true,
+                                onClick: async () => {
+                                    const res = await ipcRenderer.invoke('debug-adjust-friend-intimacy', {
+                                        friendCharacterId: f.friendCharacterId,
+                                        delta: 10
+                                    });
+                                    if (!res.success) {
+                                        showAlert(res.message || '조정 실패');
+                                        return;
+                                    }
+                                    loadFriendsData();
+                                }
                             }
                         ]
                     });
@@ -1387,9 +1444,6 @@
                 { label: '초대코드', value: character.inviteCode || '-' },
                 { label: '종족', value: character.species || '-' },
                 { label: '단계', value: `${character.stageIndex ?? '-'}단계` },
-                { label: '행복도', value: `${character.happiness ?? '-'} / 100` },
-                { label: '배고픔', value: `${character.hunger ?? '-'} / 100` },
-                { label: '건강', value: `${character.health ?? '-'} / 100` },
                 { label: '생존', value: character.isAlive ? '살아있음' : '사망' }
             ];
 
@@ -1442,6 +1496,23 @@
                 return;
             }
             renderCharacterInfo(res.data.character, res.data.events || []);
+            const stats = await ipcRenderer.invoke('get-player-status');
+            const infoEvoContainer = document.getElementById('info-evo-container');
+            if (infoEvoContainer) {
+                if (stats.level > 0) {
+                    infoEvoContainer.style.display = 'block';
+                    if (stats.level >= 3) {
+                        document.getElementById('info-evo-bar').style.width = '100%';
+                        document.getElementById('info-evo-val').textContent = '100%';
+                    } else {
+                        const evoProgress = Number(stats.evolutionProgress ?? 0);
+                        document.getElementById('info-evo-bar').style.width = `${evoProgress}%`;
+                        document.getElementById('info-evo-val').textContent = `${evoProgress.toFixed(2)}%`;
+                    }
+                } else {
+                    infoEvoContainer.style.display = 'none';
+                }
+            }
             characterInfoModal.style.display = 'flex';
         }
 
@@ -1613,27 +1684,24 @@
                     document.getElementById('character-intimacy').style.opacity = '1';
                 }
 
-                // Update Evolution Bar
-                const evoContainer = document.getElementById('evo-container');
-                if (stats.level > 0) {
-                    evoContainer.style.display = 'block';
-                    if (stats.level >= 3) {
-                        document.getElementById('evo-bar').style.width = '100%';
-                        document.getElementById('evo-val').textContent = '100%';
-                    } else {
-                        const evoProgress = Number(stats.evolutionProgress ?? 0);
-                        document.getElementById('evo-bar').style.width = `${evoProgress}%`;
-                        document.getElementById('evo-val').textContent = `${evoProgress.toFixed(2)}%`;
-                    }
-                } else {
-                    evoContainer.style.display = 'none';
-                }
+                // Update Hunger Bar
+                const hunger = Number(stats.hunger ?? 0);
+                const hungerBar = document.getElementById('hunger-bar');
+                if (hungerBar) hungerBar.style.width = `${hunger}%`;
+                const hungerVal = document.getElementById('hunger-val');
+                if (hungerVal) hungerVal.textContent = `${Math.round(hunger)}/100`;
 
                 const debugEvo = document.getElementById('debug-evo');
                 if (debugEvo) debugEvo.textContent = Number(stats.evolutionProgress ?? 0).toFixed(2);
 
                 const debugTime = document.getElementById('debug-time');
-                if (debugTime) debugTime.textContent = `${stats.timeOffsetHours ?? 0}h`;
+                if (debugTime) {
+                    const offset = Number(stats.timeOffsetHours ?? 0);
+                    const now = new Date();
+                    const adjusted = new Date(now.getTime() + offset * 60 * 60 * 1000);
+                    const hour = adjusted.getHours() + adjusted.getMinutes() / 60;
+                    debugTime.textContent = `${hour.toFixed(2)}h`;
+                }
 
                 const debugFeed = document.getElementById('debug-feed');
                 if (debugFeed) debugFeed.textContent = stats.feedCount ?? 0;
@@ -1645,6 +1713,11 @@
                 if (debugCafe) {
                     const pct = Math.round((stats.cafeChance ?? 0) * 100);
                     debugCafe.textContent = `${pct}%`;
+                }
+                const debugBreeding = document.getElementById('debug-breeding');
+                if (debugBreeding) {
+                    const pct = Math.round((stats.breedingChance ?? 0) * 100);
+                    debugBreeding.textContent = `${pct}%`;
                 }
 
                 // Update Play Button (Cooldown & Level Check) - Now inside Menu
@@ -1698,6 +1771,7 @@
                 if (!res?.success) {
                     showAlert(res?.message || '디버그 반영 실패');
                 }
+                ipcRenderer.invoke('debug-check-places');
                 updateStats();
             });
         }
@@ -1790,14 +1864,6 @@
             menuModal.style.display = 'none';
         });
 
-        document.getElementById('place-debug-btn').addEventListener('click', async () => {
-            menuModal.style.display = 'none';
-            const res = await ipcRenderer.invoke('get-all-places');
-            const places = res?.success ? (res.data || []) : [];
-            renderPlaceDebugList(places);
-            placeDebugModal.style.display = 'flex';
-        });
-
         document.getElementById('character-info-btn').addEventListener('click', openCharacterInfo);
 
         document.querySelectorAll('.friends-tab').forEach((btn) => {
@@ -1831,6 +1897,14 @@
                 placesModal.style.display = 'flex';
                 menuModal.style.display = 'none';
             });
+        });
+
+        document.getElementById('place-debug-btn').addEventListener('click', async () => {
+            menuModal.style.display = 'none';
+            const res = await ipcRenderer.invoke('get-all-places');
+            const places = res?.success ? (res.data || []) : [];
+            renderPlaceDebugList(places);
+            placeDebugModal.style.display = 'flex';
         });
 
         document.getElementById('close-modal').addEventListener('click', () => {

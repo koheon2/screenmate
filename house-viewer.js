@@ -40,7 +40,7 @@ const placementOverride = {
 const placementModelY = params.get('placementModelY');
 const hasPlacementOverride = Object.values(placementOverride).every((v) => v !== null && v !== '');
 const hasModelYOverride = placementModelY !== null && placementModelY !== '';
-const timeOffsetHours = Number(params.get('timeOffsetHours') || '0');
+let timeOffsetHours = Number(params.get('timeOffsetHours') || '0');
 
 console.log('[HouseViewer] breedingStage:', breedingStage, 'partnerName:', partnerName);
 
@@ -255,6 +255,14 @@ applyTimeOfDayLighting();
 window.__setDebugHour = (hour) => {
     debugHour = Number.isFinite(hour) ? hour : null;
     applyTimeOfDayLighting(debugHour);
+};
+
+window.__setTimeOffsetHours = (offset) => {
+    const next = Number(offset);
+    if (!Number.isFinite(next)) return;
+    timeOffsetHours = next;
+    debugHour = null;
+    applyTimeOfDayLighting(null);
 };
 
 

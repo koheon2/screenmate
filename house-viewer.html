@@ -230,7 +230,7 @@
             align-items: center;
             justify-content: center;
             z-index: 120;
-            pointer-events: none;
+            pointer-events: auto;
         }
 
         #pharmacy-overlay.visible {
@@ -446,7 +446,7 @@
         const doorOverlay = document.getElementById('door-overlay');
         const curtainOverlay = document.getElementById('curtain-overlay');
         const params = new URLSearchParams(window.location.search);
-        const capturedScreenUrl = params.get('screen') || '';
+        let capturedScreenUrl = params.get('screen') || '';
         const isNewPlace = params.get('isNew') === '1';
         const placeId = params.get('placeId') || 'house1';
         const placeBedBtn = document.getElementById('place-bed');
@@ -461,6 +461,20 @@
         if (placeId === 'pharmacy') {
             pharmacyOverlay.classList.add('visible');
         }
+
+        ipcRenderer.on('debug-time-updated', (event, payload = {}) => {
+            const offsetHours = payload?.offsetHours;
+            if (typeof window.__setTimeOffsetHours === 'function') {
+                window.__setTimeOffsetHours(offsetHours);
+            }
+            if (typeof offsetHours === 'number') {
+                const now = new Date();
+                const adjusted = new Date(now.getTime() + offsetHours * 60 * 60 * 1000);
+                const hour = adjusted.getHours() + adjusted.getMinutes() / 60;
+                timeVal.textContent = `${hour.toFixed(2)}h`;
+                timeRange.value = hour.toFixed(2);
+            }
+        });
 
         if (debugPlacement && placementPanel) {
             placementPanel.style.display = 'block';
@@ -693,7 +707,10 @@
             });
         }
 
+        let doorSequenceStarted = false;
         async function runDoorSequence() {
+            if (doorSequenceStarted) return;
+            doorSequenceStarted = true;
             curtainOverlay.classList.add('opened');
             curtainOverlay.style.pointerEvents = 'none';
             if (!isNewPlace) {
@@ -712,8 +729,22 @@
             setupEraserCanvas(capturedScreenUrl);
         }
 
+        ipcRenderer.on('house-screen', (event, dataUrl) => {
+            if (dataUrl) {
+                capturedScreenUrl = dataUrl;
+            }
+            // If we were waiting on the screen, start now.
+            if (isNewPlace && capturedScreenUrl) {
+                runDoorSequence();
+            }
+        });
+
         // Wait for the main process to resize this window to full screen.
-        setTimeout(runDoorSequence, 350);
+        setTimeout(() => {
+            if (!isNewPlace || capturedScreenUrl) {
+                runDoorSequence();
+            }
+        }, 350);
     </script>
     <script type="module" src="house-viewer.js"></script>
 </body>
