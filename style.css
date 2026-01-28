@@ -35,6 +35,8 @@ body {
     /* Apply SVG filter to remove white background -> REMOVED */
     filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.1));
     transition: transform 0.5s ease;
+    -webkit-user-drag: none;
+    /* Prevent native image drag */
 }
 
 body[data-emotion="sad"] #character {
@@ -57,6 +59,12 @@ body[data-emotion="boring"] #character {
 
 .flipped {
     transform: scaleX(-1);
+}
+
+.dragging {
+    cursor: grabbing !important;
+    transition: none !important;
+    /* Disable smooth movement for latency-free drag */
 }
 
 @keyframes popup {

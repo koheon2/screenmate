@@ -60,7 +60,7 @@ let characterWindow = null;
 let chatWindow = null;
 let playWindow = null;
 let petGameWindow = null;
-let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false, isSleeping: false };
+let characterState = { isReturningHome: false, isFocusMode: false, isExiting: false, isSleeping: false, isWindowDragging: false };
 let tray = null;
 
 // User state
@@ -1967,7 +1967,7 @@ function createCharacterWindow() {
 
     // Toggle movement state every 5 seconds
     const movementToggle = setInterval(() => {
-        if (!characterState.isReturningHome && !characterState.isFocusMode) {
+        if (!characterState.isReturningHome && !characterState.isFocusMode && !characterState.isWindowDragging) {
             if (Math.random() > 0.7) {
                 isMoving = false;
                 // console.log('Character is resting...');
@@ -1988,6 +1988,12 @@ function createCharacterWindow() {
         }
 
         let currentBounds = characterWindow.getBounds();
+        if (characterState.isWindowDragging) {
+            x = currentBounds.x;
+            y = currentBounds.y;
+            positionChatWindow();
+            return;
+        }
         // If user drags character, update internal x,y
         // Note: Drag might fight with this loop if not handled carefully, 
         // but since we update bounds every frame, it overrides drag unless paused.
@@ -3897,6 +3903,25 @@ ipcMain.on('pet-game-close', (event, { finalScore }) => {
 
         saveUserData();
     }
+});
+
+// Enable drag
+ipcMain.on('window-drag', (event, { dx, dy }) => {
+    if (characterWindow) {
+        try {
+            const bounds = characterWindow.getBounds();
+            characterWindow.setBounds({
+                x: bounds.x + dx,
+                y: bounds.y + dy,
+                width: bounds.width,
+                height: bounds.height
+            });
+        } catch (e) { }
+    }
+});
+
+ipcMain.on('set-dragging', (event, isDragging) => {
+    characterState.isWindowDragging = isDragging;
 });
 
 app.on('window-all-closed', () => {
