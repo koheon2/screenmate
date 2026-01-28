@@ -214,6 +214,7 @@ const INITIAL_STATS = {
     park2UsedFriendIds: [],
     friendIntimacyOverrides: {},
     achievements: {},
+    firstDeathAchievement: false,
     visibleAccumMillis: 0,
     visibleLastTickAt: 0,
     placePlacements: {},
@@ -222,6 +223,7 @@ const INITIAL_STATS = {
     sickRecovered: false,
     pendingLineageParents: null,
     lineageCreated: false,
+    forceNewCharacter: false,
     localUpdatedAt: 0,
     serverVersion: 0,
     serverUpdatedAt: 0
@@ -382,12 +384,13 @@ async function upsertAchievementInDB(achievementId, label) {
     }
 }
 
-function markAchievement(key, label) {
+function markAchievement(key, label, description = null) {
     if (!playerStats) return;
     playerStats.achievements = playerStats.achievements || {};
     if (playerStats.achievements[key]) return;
     playerStats.achievements[key] = {
         label,
+        description: description || null,
         achievedAt: Date.now()
     };
     recordCharacterEvent('MILESTONE', `업적 달성: ${label}`, { achievementKey: key });
@@ -589,10 +592,16 @@ function loadUserData() {
                 }
                 playerStats.pendingPaydayDebug = !!playerStats.pendingPaydayDebug;
                 playerStats.hunger = typeof playerStats.hunger === 'number' ? playerStats.hunger : 0;
+                playerStats.firstDeathAchievement = !!playerStats.firstDeathAchievement;
+                playerStats.forceNewCharacter = !!playerStats.forceNewCharacter;
                 playerStats.debugTimeOffsetHours = Number.isFinite(playerStats.debugTimeOffsetHours) ? playerStats.debugTimeOffsetHours : 0;
                 playerStats.visibleAccumMillis = playerStats.visibleAccumMillis || 0;
                 playerStats.visibleLastTickAt = playerStats.visibleLastTickAt || 0;
                 playerStats.placePlacements = playerStats.placePlacements || {};
+                const devicePlacements = getDevicePlacePlacements();
+                if (devicePlacements && Object.keys(devicePlacements).length) {
+                    playerStats.placePlacements = devicePlacements;
+                }
                 Object.keys(playerStats.placePlacements).forEach((placeId) => {
                     normalizePlacePlacement(placeId);
                 });
@@ -652,6 +661,31 @@ function saveUserData(options = {}) {
     } catch (e) {
         console.error('Failed to save user data:', e);
     }
+}
+
+function resetPlayerStatsForNewPet({ preservePlacements = true, preserveMeta = false } = {}) {
+    const devicePlacements = getDevicePlacePlacements();
+    const preservedPlacements = preservePlacements ? (playerStats?.placePlacements || {}) : {};
+    const preservedAchievements = preserveMeta ? (playerStats?.achievements || {}) : {};
+    const preservedPlaces = preserveMeta ? (playerStats?.discoveredPlaces || []) : [];
+    const preservedPark2 = [];
+    playerStats = {
+        ...INITIAL_STATS,
+        lastEvolutionTime: Date.now(),
+        lastFedTime: Date.now(),
+        lastHungerDamageTime: Date.now()
+    };
+    playerStats.placePlacements = Object.keys(devicePlacements || {}).length ? devicePlacements : preservedPlacements;
+    playerStats.achievements = preservedAchievements;
+    playerStats.discoveredPlaces = preservedPlaces;
+    playerStats.park2UsedFriendIds = preservedPark2;
+    playerStats.debugTimeOffsetHours = 0;
+    playerStats.cafeChance = DEFAULT_CAFE_CHANCE;
+    playerStats.breedingChance = DEFAULT_BREEDING_CHANCE;
+    playerStats.friendIntimacyOverrides = {};
+    playerStats.pendingPaydayDebug = false;
+    playerStats.forceNewCharacter = true;
+    playerStats.dbCharacterId = null;
 }
 
 // ==================== AUTH DATA PERSISTENCE ====================// Save auth data
@@ -964,6 +998,9 @@ function applyServerCharacterToLocal(me) {
 async function syncFullStateFromDB() {
     try {
         if (!global.authTokens) return;
+        if (playerStats?.forceNewCharacter) {
+            return;
+        }
 
         // Fetch latest data from DB
         const bootstrap = await getBootstrapSafe();
@@ -1354,24 +1391,11 @@ async function syncCharacterToDB() {
 
     // Check if we already have a characterId stored
     if (!playerStats.dbCharacterId) {
-        // Try to get existing characters first
-        const existingChars = await getCharactersFromDB();
-        if (existingChars.length > 0) {
-            // Use the first alive character
-            const aliveChar = existingChars.find(c => c.isAlive) || existingChars[0];
-            playerStats.dbCharacterId = aliveChar.id;
-            playerStats.lastSyncedStageIndex = aliveChar.stageIndex ?? aliveChar.stage_index ?? 0;
-            playerStats.serverVersion = aliveChar.version ?? playerStats.serverVersion ?? 0;
-            playerStats.serverUpdatedAt = getServerUpdatedAtMillis(aliveChar.updatedAt);
-            console.log('Linked to existing DB character:', aliveChar.id);
-        } else {
-            // Create new character
-            // Use Korean name for name, but hardcode species to '고양이' (Cat) to avoid backend 500 error
-            // It seems backend only accepts specific species enum or existing values.
+        if (playerStats.forceNewCharacter) {
             const koreanName = getKoreanName(playerStats.characterName);
             const newChar = await createCharacterInDB(
                 koreanName || '새 친구',
-                '고양이', // species (Fixed to valid value)
+                '고양이',
                 '다마고치 스타일 캐릭터'
             );
             if (newChar) {
@@ -1379,6 +1403,35 @@ async function syncCharacterToDB() {
                 playerStats.serverVersion = newChar.version ?? 0;
                 playerStats.serverUpdatedAt = getServerUpdatedAtMillis(newChar.updatedAt);
                 playerStats.localUpdatedAt = playerStats.serverUpdatedAt;
+                playerStats.forceNewCharacter = false;
+            }
+        } else {
+            // Try to get existing characters first
+            const existingChars = await getCharactersFromDB();
+            if (existingChars.length > 0) {
+                // Use the first alive character
+                const aliveChar = existingChars.find(c => c.isAlive) || existingChars[0];
+                playerStats.dbCharacterId = aliveChar.id;
+                playerStats.lastSyncedStageIndex = aliveChar.stageIndex ?? aliveChar.stage_index ?? 0;
+                playerStats.serverVersion = aliveChar.version ?? playerStats.serverVersion ?? 0;
+                playerStats.serverUpdatedAt = getServerUpdatedAtMillis(aliveChar.updatedAt);
+                console.log('Linked to existing DB character:', aliveChar.id);
+            } else {
+                // Create new character
+                // Use Korean name for name, but hardcode species to '고양이' (Cat) to avoid backend 500 error
+                // It seems backend only accepts specific species enum or existing values.
+                const koreanName = getKoreanName(playerStats.characterName);
+                const newChar = await createCharacterInDB(
+                    koreanName || '새 친구',
+                    '고양이', // species (Fixed to valid value)
+                    '다마고치 스타일 캐릭터'
+                );
+                if (newChar) {
+                    playerStats.dbCharacterId = newChar.id;
+                    playerStats.serverVersion = newChar.version ?? 0;
+                    playerStats.serverUpdatedAt = getServerUpdatedAtMillis(newChar.updatedAt);
+                    playerStats.localUpdatedAt = playerStats.serverUpdatedAt;
+                }
             }
         }
         saveUserData();
@@ -1393,6 +1446,7 @@ async function syncCharacterToDB() {
         const assignedHouseId = ensureAssignedHouseId();
 
         const updated = await updateCharacterInDB(playerStats.dbCharacterId, {
+            name: getKoreanName(playerStats.characterName),
             happiness: playerStats.happiness,
             health: playerStats.hp,
             stageIndex: safeStageIndex,
@@ -1535,6 +1589,9 @@ ipcMain.handle('debug-adjust-stat', async (event, payload = {}) => {
         case 'hp': {
             const current = Number(playerStats.hp) || 0;
             playerStats.hp = clamp(current + delta);
+            if (playerStats.hp > 0) {
+                playerStats.deathEventSent = false;
+            }
             break;
         }
         case 'evolutionProgress': {
@@ -1726,8 +1783,8 @@ async function checkPlaceConditionsFromDebug() {
     if (!playerStats || !isGameRunning) return false;
     await refreshFriendsCache(true);
     if (maybeTriggerPoliceAfterBank()) return true;
-    if (maybeTriggerCafeVisit()) return true;
     if (maybeTriggerSchoolVisit()) return true;
+    if (maybeTriggerCafeVisit()) return true;
     if (maybeTriggerToiletVisit()) return true;
     if (maybeTriggerPark2Visit()) return true;
     return false;
@@ -1775,14 +1832,7 @@ ipcMain.handle('reset-game', () => {
         const deadPet = { ...playerStats, deathTime: Date.now() };
         petHistory.push(deadPet);
     }
-
-    // 2. Reset to initial state for a NEW pet
-    playerStats = {
-        ...INITIAL_STATS,
-        lastEvolutionTime: Date.now(),
-        lastFedTime: Date.now(),
-        lastHungerDamageTime: Date.now()
-    };
+    resetPlayerStatsForNewPet({ preservePlacements: true, preserveMeta: true });
 
     saveUserData();
     return { success: true };
@@ -1794,6 +1844,19 @@ function handleDeath() {
         characterWindow = null;
     }
     console.log('--- CHARACTER HAS DIED ---');
+    if (!playerStats.firstDeathAchievement) {
+        markAchievement(
+            'first-death-tamagotchi',
+            '사람이 죽으면 먼저 가있던 다마고치가 마중나온다는 말이 있다.',
+            '나는 이 말을 정말 좋아한다.'
+        );
+        playerStats.firstDeathAchievement = true;
+    }
+    playerStats.debugTimeOffsetHours = 0;
+    playerStats.cafeChance = DEFAULT_CAFE_CHANCE;
+    playerStats.breedingChance = DEFAULT_BREEDING_CHANCE;
+    playerStats.friendIntimacyOverrides = {};
+    playerStats.pendingPaydayDebug = false;
     if (!playerStats.deathEventSent) {
         playerStats.deathEventSent = true;
         recordCharacterEvent('DEATH', '세상을 떠났다.', {
@@ -2384,6 +2447,30 @@ function getDeviceId() {
         }
     }
     return devId;
+}
+
+function loadDeviceData() {
+    try {
+        if (fs.existsSync(deviceDataPath)) {
+            return JSON.parse(fs.readFileSync(deviceDataPath, 'utf8')) || {};
+        }
+    } catch (e) { }
+    return {};
+}
+
+function getDevicePlacePlacements() {
+    const data = loadDeviceData();
+    return (data && data.placePlacements) ? data.placePlacements : {};
+}
+
+function saveDevicePlacePlacements(placePlacements) {
+    try {
+        const data = loadDeviceData();
+        data.placePlacements = placePlacements || {};
+        fs.writeFileSync(deviceDataPath, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+        console.error('Failed to save device place placements:', e);
+    }
 }
 
 async function performGoogleLogin() {
@@ -3709,7 +3796,7 @@ ipcMain.handle('progress-get-achievements', async () => {
             achievements.push({
                 achievementId,
                 name: info.label || achievementId,
-                description: info.label || achievementId,
+                description: info.description || info.label || achievementId,
                 category: 'local',
                 points: 0,
                 hidden: false,
@@ -3738,7 +3825,7 @@ ipcMain.handle('progress-get-places', async () => {
         if (assignedHouseId) discoveredIds.add(assignedHouseId);
 
         const defList = Array.isArray(definitions) ? definitions : [];
-        const places = defList.map((def) => {
+        let places = defList.map((def) => {
             const local = getPlaceById(def.placeId);
             return {
                 id: def.placeId,
@@ -3751,9 +3838,35 @@ ipcMain.handle('progress-get-places', async () => {
             };
         });
 
+        if (!places.length) {
+            const fallback = PLACES.map((p) => ({
+                id: p.id,
+                name: p.name,
+                region: null,
+                rarity: null,
+                icon: p.icon,
+                model: p.model,
+                unlocked: discoveredIds.has(p.id)
+            }));
+            places = fallback;
+        }
+
         return { success: true, data: places };
     } catch (err) {
-        return { success: false, message: err.response?.data?.message || err.message };
+        const localDiscovered = Array.isArray(playerStats?.discoveredPlaces) ? playerStats.discoveredPlaces : [];
+        const discoveredIds = new Set(localDiscovered);
+        const assignedHouseId = ensureAssignedHouseId();
+        if (assignedHouseId) discoveredIds.add(assignedHouseId);
+        const fallback = PLACES.map((p) => ({
+            id: p.id,
+            name: p.name,
+            region: null,
+            rarity: null,
+            icon: p.icon,
+            model: p.model,
+            unlocked: discoveredIds.has(p.id)
+        }));
+        return { success: true, data: fallback };
     }
 });
 
@@ -3914,57 +4027,18 @@ ipcMain.on('breeding-egg-acquired', async () => {
 
     const parentACharacterId = playerStats.breedingParentCharacterId || playerStats.dbCharacterId || null;
     const parentBCharacterId = playerStats.breedingPartner?.friendCharacterId || null;
-    const preservedAchievements = playerStats.achievements || {};
-    const preservedPlaces = playerStats.discoveredPlaces || [];
-    const preservedPark2 = playerStats.park2UsedFriendIds || [];
 
     archiveCurrentPet('BREEDING');
     await retireCurrentCharacterForBreeding();
 
-    // Reset into a fresh egg state while preserving meta-progress.
-    playerStats.level = 0;
-    playerStats.happiness = 50;
-    playerStats.hp = 100;
-    playerStats.clickCount = 0;
-    playerStats.evolutionProgress = 0;
-    playerStats.lastEvolutionTime = Date.now();
-    playerStats.lastPlayTime = 0;
-    playerStats.lastFedTime = Date.now();
-    playerStats.lastHungerDamageTime = Date.now();
-    playerStats.lastAgingTime = Date.now();
-    playerStats.birthday = Date.now();
-    playerStats.gender = null;
-    playerStats.characterName = null;
-    playerStats.assignedHouseId = null;
-    playerStats.awayModeActive = false;
-    clearForcedAway();
-    playerStats.sleepModeActive = false;
-    playerStats.wokeUpEarlyDate = null;
-    playerStats.intimacyScore = 0;
-    playerStats.feedCount = 0;
-    playerStats.visibleAccumMillis = 0;
-    playerStats.visibleLastTickAt = Date.now();
-    playerStats.sickModeActive = false;
-    playerStats.sickAnnounced = false;
-    playerStats.sickRecovered = false;
-    playerStats.achievements = preservedAchievements;
-    playerStats.discoveredPlaces = preservedPlaces;
-    playerStats.park2UsedFriendIds = preservedPark2;
-
-    playerStats.hasEgg = true;
-    playerStats.breedingStage = null;
-    playerStats.breedingPartner = null;
-    playerStats.breedingParentCharacterId = null;
-    playerStats.breedingEggOrigin = true;
-    showEggInUi();
+    // Reset into a fresh egg state using the same flow as "새로운 펫 입양하기".
+    resetPlayerStatsForNewPet({ preservePlacements: true, preserveMeta: true });
 
     if (parentACharacterId && parentBCharacterId) {
         playerStats.pendingLineageParents = { parentACharacterId, parentBCharacterId };
         playerStats.lineageCreated = false;
     }
 
-    // Detach from the previous character so a fresh one is created on next sync.
-    playerStats.dbCharacterId = null;
     playerStats.lastSyncedStageIndex = 0;
     playerStats.serverVersion = 0;
     playerStats.serverUpdatedAt = 0;
@@ -3999,6 +4073,7 @@ ipcMain.handle('save-place-placement', (event, payload) => {
     };
     placeData.activeId = id;
     playerStats.placePlacements[placeId] = placeData;
+    saveDevicePlacePlacements(playerStats.placePlacements);
     saveUserData({ touchLocalUpdatedAt: false });
     return { success: true, data: { placementId: id, ...placeData.placements[id] } };
 });

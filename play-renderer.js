@@ -168,7 +168,7 @@ function startGame(mode) {
 
 function setupTimer() {
     timerEl.style.display = 'block';
-    timeLeft = 3; // Testing: 30 -> 3
+    timeLeft = 30;
     timerEl.textContent = `00:${timeLeft}`;
 
     if (gameTimer) clearInterval(gameTimer);
