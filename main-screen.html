@@ -863,6 +863,14 @@
             transform: translateX(-50%) translateY(0);
         }
 
+        .place-toast.achievement-toast {
+            font-size: 16px;
+            padding: 14px 20px;
+            border-radius: 16px;
+            max-width: 85vw;
+            text-align: center;
+        }
+
         .alert-message {
             font-size: 12px;
             color: #333;
@@ -1643,17 +1651,23 @@
             });
         }
 
-        function showToast(message) {
+        function showToast(message, options = {}) {
             const toast = document.getElementById('place-toast');
             if (!toast) return;
+            const { duration = 1400, className = '' } = options;
             toast.textContent = message;
+            if (className) toast.classList.add(className);
             toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 1400);
+            if (toast._hideTimer) clearTimeout(toast._hideTimer);
+            toast._hideTimer = setTimeout(() => {
+                toast.classList.remove('show');
+                if (className) toast.classList.remove(className);
+            }, duration);
         }
 
         function showAchievementToast(label) {
             const text = label ? `🏆 업적 달성: ${label}` : '🏆 업적 달성';
-            showToast(text);
+            showToast(text, { duration: 3200, className: 'achievement-toast' });
         }
 
         function renderPlaceDebugList(places = []) {

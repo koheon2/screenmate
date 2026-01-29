@@ -606,8 +606,19 @@ function loadUserData() {
                 playerStats.visibleLastTickAt = playerStats.visibleLastTickAt || 0;
                 playerStats.placePlacements = playerStats.placePlacements || {};
                 const devicePlacements = getDevicePlacePlacements();
-                if (devicePlacements && Object.keys(devicePlacements).length) {
+                const hasDevicePlacements = devicePlacements && Object.keys(devicePlacements).length;
+                if (hasDevicePlacements) {
                     playerStats.placePlacements = devicePlacements;
+                } else if (Object.keys(playerStats.placePlacements).length) {
+                    // Migrate per-user placements into device-wide storage once.
+                    saveDevicePlacePlacements(playerStats.placePlacements);
+                } else if (Array.isArray(petHistory)) {
+                    // Last-resort recovery from pet history (if active pet lost placements).
+                    const recovered = petHistory.find((pet) => pet?.placePlacements && Object.keys(pet.placePlacements).length);
+                    if (recovered?.placePlacements) {
+                        playerStats.placePlacements = recovered.placePlacements;
+                        saveDevicePlacePlacements(playerStats.placePlacements);
+                    }
                 }
                 Object.keys(playerStats.placePlacements).forEach((placeId) => {
                     normalizePlacePlacement(placeId);
@@ -682,6 +693,9 @@ function resetPlayerStatsForNewPet({ preservePlacements = true, preserveMeta = f
         lastFedTime: Date.now(),
         lastHungerDamageTime: Date.now()
     };
+    if (!Object.keys(devicePlacements || {}).length && Object.keys(preservedPlacements || {}).length) {
+        saveDevicePlacePlacements(preservedPlacements);
+    }
     playerStats.placePlacements = Object.keys(devicePlacements || {}).length ? devicePlacements : preservedPlacements;
     playerStats.achievements = preservedAchievements;
     playerStats.discoveredPlaces = preservedPlaces;
@@ -2491,13 +2505,40 @@ function getDeviceId() {
     return devId;
 }
 
+function getAllDeviceDataPaths() {
+    const appData = app.getPath('appData');
+    const candidates = [
+        deviceDataPath,
+        path.join(appData, 'cynicalfloater', 'device-data.json'),
+        path.join(appData, 'Screenmate', 'device-data.json')
+    ];
+    return Array.from(new Set(candidates));
+}
+
 function loadDeviceData() {
-    try {
-        if (fs.existsSync(deviceDataPath)) {
-            return JSON.parse(fs.readFileSync(deviceDataPath, 'utf8')) || {};
-        }
-    } catch (e) { }
-    return {};
+    const paths = getAllDeviceDataPaths();
+    let fallback = {};
+    for (const p of paths) {
+        try {
+            if (!fs.existsSync(p)) continue;
+            const data = JSON.parse(fs.readFileSync(p, 'utf8')) || {};
+            if (data && data.placePlacements && Object.keys(data.placePlacements).length) {
+                // If we found placements in another app container, sync to current.
+                if (p !== deviceDataPath) {
+                    try {
+                        fs.mkdirSync(path.dirname(deviceDataPath), { recursive: true });
+                        fs.writeFileSync(deviceDataPath, JSON.stringify(data, null, 2), 'utf8');
+                    } catch (e) { }
+                }
+                return data;
+            }
+            // Keep a fallback with deviceId if present.
+            if (data && Object.keys(data).length && !Object.keys(fallback).length) {
+                fallback = data;
+            }
+        } catch (e) { }
+    }
+    return fallback;
 }
 
 function getDevicePlacePlacements() {
@@ -2509,7 +2550,13 @@ function saveDevicePlacePlacements(placePlacements) {
     try {
         const data = loadDeviceData();
         data.placePlacements = placePlacements || {};
-        fs.writeFileSync(deviceDataPath, JSON.stringify(data, null, 2), 'utf8');
+        const paths = getAllDeviceDataPaths();
+        paths.forEach((p) => {
+            try {
+                fs.mkdirSync(path.dirname(p), { recursive: true });
+                fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+            } catch (e) { }
+        });
     } catch (e) {
         console.error('Failed to save device place placements:', e);
     }
@@ -3524,7 +3571,7 @@ setInterval(() => {
 setInterval(() => {
     if (!playerStats || !isGameRunning) return;
     updateDynamicImage();
-}, 15000);
+}, 7000);
 
 // Refresh friends cache periodically for park2 triggers.
 setInterval(() => {
