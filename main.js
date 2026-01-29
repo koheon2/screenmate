@@ -1995,7 +1995,7 @@ function normalizeCharacterKey(name) {
 }
 
 function resolveBreedingPartnerImageUrl(partner) {
-    const partnerName = partner?.friendName || '';
+    const partnerName = normalizeCharacterKey(partner?.friendName || '');
     const partnerPath =
         resolveSpritePathFor(partnerName, 3, 'kissing.webp') ||
         resolveSpritePathFor(partnerName, 3, 'normal.webp') ||
@@ -2004,7 +2004,7 @@ function resolveBreedingPartnerImageUrl(partner) {
 }
 
 function resolveBreedingPartnerNormalImageUrl(partner) {
-    const partnerName = partner?.friendName || '';
+    const partnerName = normalizeCharacterKey(partner?.friendName || '');
     const partnerPath =
         resolveSpritePathFor(partnerName, 3, 'normal.webp') ||
         path.join(__dirname, 'assets/level3/mametchi/normal.webp');
