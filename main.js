@@ -69,6 +69,7 @@ let isGameRunning = false;
 let playerStats = null;
 const DEFAULT_CAFE_CHANCE = 0.1;
 const DEFAULT_BREEDING_CHANCE = 0.01;
+const FIVE_HOURS = 5 * 60 * 60 * 1000;
 let petHistory = []; // Archive for dead pets
 let bootstrapCache = null;
 let friendsCache = [];
@@ -424,7 +425,7 @@ function setForcedAway(placeId, reason, meta = null) {
     playerStats.awayModeActive = true;
     saveUserData();
 
-    if (characterWindow && !characterState.isReturningHome) {
+    if (characterWindow && !characterState.isReturningHome && !playerStats?.sickModeActive) {
         return { alreadyVisible: true };
     }
     if (homeWindow) {
@@ -2094,6 +2095,12 @@ async function createHouseWindow(
             toilet: 'happy',
             park2: 'happy'
         };
+        if (place.id === 'pharmacy') {
+            const sickPath =
+                resolveSpritePathFor(playerStats.characterName, playerStats.level || 1, 'sad.webp') ||
+                resolveSpritePathFor(playerStats.characterName, playerStats.level || 1, 'normal.webp');
+            if (sickPath) spritePath = sickPath;
+        }
         const emotion = placeEmotionMap[place.id];
         if (emotion) {
             const emotionPath =
