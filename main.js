@@ -1629,6 +1629,9 @@ ipcMain.handle('debug-adjust-stat', async (event, payload = {}) => {
             const current = Number(playerStats.visibleAccumMillis) || 0;
             const next = Math.max(0, current + delta * 60 * 1000);
             playerStats.visibleAccumMillis = next;
+            if (!playerStats.sickModeActive && playerStats.visibleAccumMillis >= FIVE_HOURS) {
+                triggerSickMode();
+            }
             break;
         }
         case 'cafeChance': {

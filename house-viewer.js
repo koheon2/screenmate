@@ -598,6 +598,12 @@ function handlePlaceSpeechInteraction(event) {
         showSpeech('잘못했어요~ㅠㅠ');
         return;
     }
+    if (placeId === 'school') {
+        const schoolLines = ['심심해', '집에 가고 싶어'];
+        const line = schoolLines[Math.floor(Math.random() * schoolLines.length)];
+        showSpeech(line);
+        return;
+    }
     if (placeId.startsWith('house')) {
         const houseLines = ['나랑 놀고 싶어?', '지금 공부중이야!'];
         const line = houseLines[Math.floor(Math.random() * houseLines.length)];
