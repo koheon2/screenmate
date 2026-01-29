@@ -76,7 +76,6 @@ let friendsCacheAt = 0;
 // 5 minutes cooldown (Disabled for testing)
 // 5 minutes cooldown (Disabled for testing)
 const PLAY_COOLDOWN = 0;
-const FEED_COOLDOWN = 4 * 60 * 60 * 1000;
 // Dynamic user data path based on logged-in user
 function getUserDataPath() {
     if (!currentUser || !currentUser.id) return null;
@@ -4067,13 +4066,6 @@ ipcMain.handle('start-play-mode', (event, mode) => {
     }
     if (isBreedingActive()) {
         return { success: false, message: '지금은 바빠...' };
-    }
-    if (mode === 'food') {
-        const lastFed = playerStats.lastFedTime || 0;
-        if (now - lastFed < FEED_COOLDOWN) {
-            const remaining = Math.ceil((FEED_COOLDOWN - (now - lastFed)) / (60 * 1000));
-            return { success: false, message: `아직 배불러... (${remaining}분 후)` };
-        }
     }
     if (now - playerStats.lastPlayTime < PLAY_COOLDOWN) {
         return { success: false, message: '아직 놀아줄 수 없습니다. (쿨타임 중)' };
