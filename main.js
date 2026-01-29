@@ -14,7 +14,6 @@ const os = require('os');
 // ==================== CONFIGURATION ====================
 const API_BASE_URL = 'http://13.125.5.67:8080';
 const GOOGLE_CLIENT_ID = '862842547000-8vtpbvn6hea2m6ugid09t3qbvr99ph9q.apps.googleusercontent.com';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || ''; // TODO: 환경 변수로 관리하거나 비밀 키를 별도로 주입하세요
 const ENABLE_DB_SYNC = true; // Enable DB sync
 
 
@@ -2597,31 +2596,17 @@ async function performGoogleLogin() {
                 server.close();
 
                 try {
-                    // 1. Exchange code for tokens (Google requires form-urlencoded)
-                    const tokenParams = new URLSearchParams();
-                    tokenParams.append('code', queryObject.code);
-                    tokenParams.append('client_id', GOOGLE_CLIENT_ID);
-                    tokenParams.append('client_secret', GOOGLE_CLIENT_SECRET);
-                    tokenParams.append('code_verifier', verifier);
-                    tokenParams.append('redirect_uri', redirectUri);
-                    tokenParams.append('grant_type', 'authorization_code');
-
-                    const tokenRes = await axios.post('https://oauth2.googleapis.com/token', tokenParams, {
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-                    });
-
-                    const idToken = tokenRes.data.id_token;
-
-                    // 2. Authenticate with backend
                     const backendRes = await axios.post(`${API_BASE_URL}/auth/google`, {
-                        idToken,
+                        authCode: queryObject.code,
+                        codeVerifier: verifier,
+                        redirectUri,
                         deviceId: getDeviceId(),
                         deviceName: os.hostname() || 'Desktop App'
                     });
 
                     resolve(backendRes.data);
                 } catch (err) {
-                    console.error('Token exchange/backend auth error:', err.response?.data || err.message);
+                    console.error('Backend auth error:', err.response?.data || err.message);
                     reject(new Error('Backend authentication failed: ' + (err.response?.data?.message || err.message)));
                 }
             } else if (queryObject.error) {
